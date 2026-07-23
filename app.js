@@ -1354,12 +1354,12 @@
                     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
                     const json = XLSX.utils.sheet_to_json(firstSheet);
                     
-                    parsedItems = json.map(row => {
+                    parsedItems = json.map((row, index) => {
                         const nameKey = Object.keys(row).find(k => k.toLowerCase().replace(/[\s_]/g, '') === 'itemname');
                         const categoryKey = Object.keys(row).find(k => k.toLowerCase() === 'category');
                         
                         return {
-                            id: 'I-' + Date.now() + Math.random().toString(36).substr(2, 4),
+                            id: 'I-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + index,
                             name: (row[nameKey] || row['Item Name'] || row['name'] || '').toString().trim(),
                             category: (row[categoryKey] || row['Category'] || row['category'] || 'Others').toString().trim()
                         };
@@ -1395,7 +1395,10 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(parsedItems)
                 });
-                if (!res.ok) throw new Error("Failed to save imported items on server");
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.error || "Failed to save imported items on server");
+                }
                 
                 await syncDatabase();
                 showToast(`Successfully imported ${parsedItems.length} items.`, "success");

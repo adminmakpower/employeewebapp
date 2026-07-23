@@ -438,8 +438,8 @@ app.post('/api/items', async (req, res) => {
     res.status(201).json({ message: 'Items saved successfully' });
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ error: 'Failed to save items' });
+    console.error("Error saving items:", err);
+    res.status(500).json({ error: 'Failed to save items: ' + err.message });
   } finally {
     client.release();
   }
