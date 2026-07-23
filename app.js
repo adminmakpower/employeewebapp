@@ -35,34 +35,55 @@
         { id: "r-1", userId: "u-3", date: "2026-07-22", text: "Completed testing of 200 fast charging circuits. Prepared inventory dispatch sheet." }
     ];
 
-    // Core application variables loaded from LocalStorage or Defaults
+    // Core database state, loaded from the server
     let db = {
-        users: JSON.parse(localStorage.getItem("mp_users")) || DEFAULT_USERS,
-        tasks: JSON.parse(localStorage.getItem("mp_tasks")) || DEFAULT_TASKS,
-        announcements: JSON.parse(localStorage.getItem("mp_announcements")) || DEFAULT_ANNOUNCEMENTS,
-        logs: JSON.parse(localStorage.getItem("mp_logs")) || DEFAULT_LOGS,
-        reports: JSON.parse(localStorage.getItem("mp_reports")) || DEFAULT_REPORTS
+        users: [],
+        tasks: [],
+        announcements: [],
+        logs: [],
+        reports: []
     };
 
     let currentUser = JSON.parse(sessionStorage.getItem("mp_active_user")) || null;
     let activePage = null;
 
-    // Helper to persist changes
-    function saveDatabase() {
-        localStorage.setItem("mp_users", JSON.stringify(db.users));
-        localStorage.setItem("mp_tasks", JSON.stringify(db.tasks));
-        localStorage.setItem("mp_announcements", JSON.stringify(db.announcements));
-        localStorage.setItem("mp_logs", JSON.stringify(db.logs));
-        localStorage.setItem("mp_reports", JSON.stringify(db.reports));
+    // Fetch database state from server
+    async function syncDatabase() {
+        try {
+            const res = await fetch('/api/db');
+            if (res.ok) {
+                db = await res.json();
+            } else {
+                console.error("Failed to load database from server");
+            }
+        } catch (err) {
+            console.error("Error connecting to server database", err);
+        }
     }
 
-    // Logger Utility
-    function addLog(message, type = "info") {
+    // Helper to persist changes (no-op since we save to DB now)
+    function saveDatabase() {
+        // Persisted directly to Neon database via server API
+    }
+
+    // Logger Utility (Writes to PostgreSQL via backend API)
+    async function addLog(message, type = "info") {
         const now = new Date();
         const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         const log = { id: "l-" + Date.now() + Math.random().toString(36).substr(2, 4), time: timeStr, type: type, msg: message };
-        db.logs.unshift(log); // Add to beginning
-        saveDatabase();
+        
+        try {
+            await fetch('/api/logs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(log)
+            });
+            await syncDatabase();
+        } catch (err) {
+            console.error("Failed to add log to server", err);
+            // Local fallback
+            db.logs.unshift(log);
+        }
         
         // If we are currently on logs page, re-render it
         if (currentUser && currentUser.role === "superadmin" && activePage === "superadmin-logs") {
@@ -73,7 +94,8 @@
     // ==========================================
     // 2. INITIALIZATION & ROUTING
     // ==========================================
-    window.addEventListener("DOMContentLoaded", () => {
+    window.addEventListener("DOMContentLoaded", async () => {
+        await syncDatabase();
         initApp();
         startClock();
         lucide.createIcons();
@@ -541,7 +563,7 @@
         renderSuperAdminUserTable(e.target.value);
     }
 
-    function handleCreateUser(e) {
+    async function handleCreateUser(e) {
         e.preventDefault();
 
         const name = document.getElementById("create-name").value.trim();
@@ -568,41 +590,67 @@
             avatar: initials
         };
 
-        db.users.push(newUser);
-        saveDatabase();
-        
-        showToast(`Staff account for ${name} created successfully.`, "success");
-        addLog(`Super Admin created new user: ${name} (${role}).`, "success");
+        try {
+            const res = await fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newUser)
+            });
+            if (!res.ok) throw new Error("Failed to create user on server");
+            
+            await syncDatabase();
+            showToast(`Staff account for ${name} created successfully.`, "success");
+            await addLog(`Super Admin created new user: ${name} (${role}).`, "success");
+        } catch (err) {
+            showToast("Error creating user: " + err.message, "error");
+        }
 
         // Clear and Refresh
         document.getElementById("create-user-form").reset();
         renderSuperAdminUserTable();
     }
 
-    function toggleUserStatus(userId) {
+    async function toggleUserStatus(userId) {
         const user = db.users.find(u => u.id === userId);
         if (!user) return;
 
         const newStatus = user.status === "active" ? "suspended" : "active";
-        user.status = newStatus;
-        saveDatabase();
-
-        showToast(`User ${user.name} is now ${newStatus}.`, "success");
-        addLog(`Super Admin toggled user status for ${user.name} to ${newStatus}.`, "warning");
+        
+        try {
+            const res = await fetch(`/api/users/${userId}/status`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            });
+            if (!res.ok) throw new Error("Failed to update user status");
+            
+            await syncDatabase();
+            showToast(`User ${user.name} is now ${newStatus}.`, "success");
+            await addLog(`Super Admin toggled user status for ${user.name} to ${newStatus}.`, "warning");
+        } catch (err) {
+            showToast("Error updating status: " + err.message, "error");
+        }
 
         renderSuperAdminUserTable();
     }
 
-    function deleteUserAccount(userId) {
+    async function deleteUserAccount(userId) {
         const user = db.users.find(u => u.id === userId);
         if (!user) return;
 
         if (confirm(`Are you sure you want to delete the staff account for ${user.name}? This action is irreversible.`)) {
-            db.users = db.users.filter(u => u.id !== userId);
-            saveDatabase();
-
-            showToast("Account deleted successfully.", "info");
-            addLog(`Super Admin deleted account of ${user.name}.`, "danger");
+            try {
+                const res = await fetch(`/api/users/${userId}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error("Failed to delete user");
+                
+                await syncDatabase();
+                showToast("Account deleted successfully.", "info");
+                await addLog(`Super Admin deleted account of ${user.name}.`, "danger");
+            } catch (err) {
+                showToast("Error deleting user: " + err.message, "error");
+            }
 
             renderSuperAdminUserTable();
         }
@@ -628,11 +676,19 @@
         });
     }
 
-    function handleClearLogs() {
+    async function handleClearLogs() {
         if (confirm("Are you sure you want to purge all system logs? This cannot be undone.")) {
-            db.logs = [];
-            saveDatabase();
-            showToast("System logs cleared.", "info");
+            try {
+                const res = await fetch('/api/logs', {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error("Failed to clear system logs");
+                
+                await syncDatabase();
+                showToast("System logs cleared.", "info");
+            } catch (err) {
+                showToast("Error clearing logs: " + err.message, "error");
+            }
             renderLogsPage();
         }
     }
@@ -765,7 +821,7 @@
         });
     }
 
-    function handleAssignTask(e) {
+    async function handleAssignTask(e) {
         e.preventDefault();
 
         const title = document.getElementById("task-title").value.trim();
@@ -790,26 +846,42 @@
             creator: currentUser.name
         };
 
-        db.tasks.push(newTask);
-        saveDatabase();
-
-        showToast(`Task assigned successfully to ${employee.name}.`, "success");
-        addLog(`Admin (${currentUser.name}) dispatched task "${title}" to ${employee.name}.`, "info");
+        try {
+            const res = await fetch('/api/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newTask)
+            });
+            if (!res.ok) throw new Error("Failed to save task on server");
+            
+            await syncDatabase();
+            showToast(`Task assigned successfully to ${employee.name}.`, "success");
+            await addLog(`Admin (${currentUser.name}) dispatched task "${title}" to ${employee.name}.`, "info");
+        } catch (err) {
+            showToast("Error assigning task: " + err.message, "error");
+        }
 
         document.getElementById("assign-task-form").reset();
         renderAdminTasksList();
     }
 
-    function deleteTask(taskId) {
+    async function deleteTask(taskId) {
         const task = db.tasks.find(t => t.id === taskId);
         if (!task) return;
 
         if (confirm(`Delete the task order "${task.title}"?`)) {
-            db.tasks = db.tasks.filter(t => t.id !== taskId);
-            saveDatabase();
-
-            showToast("Task deleted successfully.", "info");
-            addLog(`Admin (${currentUser.name}) deleted task order "${task.title}".`, "warning");
+            try {
+                const res = await fetch(`/api/tasks/${taskId}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error("Failed to delete task on server");
+                
+                await syncDatabase();
+                showToast("Task deleted successfully.", "info");
+                await addLog(`Admin (${currentUser.name}) deleted task order "${task.title}".`, "warning");
+            } catch (err) {
+                showToast("Error deleting task: " + err.message, "error");
+            }
 
             renderAdminTasksList();
         }
@@ -854,7 +926,7 @@
         lucide.createIcons();
     }
 
-    function handlePostAnnouncement(e) {
+    async function handlePostAnnouncement(e) {
         e.preventDefault();
 
         const title = document.getElementById("announcement-title").value.trim();
@@ -871,26 +943,42 @@
             priority: priority
         };
 
-        db.announcements.push(newAnnouncement);
-        saveDatabase();
-
-        showToast("Company announcement posted successfully.", "success");
-        addLog(`Admin (${currentUser.name}) posted new announcement: "${title}".`, "info");
+        try {
+            const res = await fetch('/api/announcements', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newAnnouncement)
+            });
+            if (!res.ok) throw new Error("Failed to save announcement on server");
+            
+            await syncDatabase();
+            showToast("Company announcement posted successfully.", "success");
+            await addLog(`Admin (${currentUser.name}) posted new announcement: "${title}".`, "info");
+        } catch (err) {
+            showToast("Error posting announcement: " + err.message, "error");
+        }
 
         document.getElementById("post-announcement-form").reset();
         renderAdminDetailedAnnouncements();
     }
 
-    function deleteAnnouncement(annId) {
+    async function deleteAnnouncement(annId) {
         const item = db.announcements.find(a => a.id === annId);
         if (!item) return;
 
         if (confirm(`Remove the announcement: "${item.title}"?`)) {
-            db.announcements = db.announcements.filter(a => a.id !== annId);
-            saveDatabase();
-
-            showToast("Announcement removed.", "info");
-            addLog(`Admin (${currentUser.name}) deleted announcement: "${item.title}".`, "warning");
+            try {
+                const res = await fetch(`/api/announcements/${annId}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error("Failed to delete announcement on server");
+                
+                await syncDatabase();
+                showToast("Announcement removed.", "info");
+                await addLog(`Admin (${currentUser.name}) deleted announcement: "${item.title}".`, "warning");
+            } catch (err) {
+                showToast("Error deleting announcement: " + err.message, "error");
+            }
 
             renderAdminDetailedAnnouncements();
         }
@@ -980,16 +1068,25 @@
         lucide.createIcons();
     }
 
-    function updateTaskStatus(taskId, action) {
+    async function updateTaskStatus(taskId, action) {
         const task = db.tasks.find(t => t.id === taskId);
         if (!task) return;
 
-        task.status = action;
-        saveDatabase();
-
-        const actionText = action === "progress" ? "marked as In Progress" : "completed";
-        showToast(`Task was successfully ${actionText}.`, "success");
-        addLog(`Employee (${currentUser.name}) updated task status of "${task.title}" to ${action}.`, "info");
+        try {
+            const res = await fetch(`/api/tasks/${taskId}/status`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: action })
+            });
+            if (!res.ok) throw new Error("Failed to update status on server");
+            
+            await syncDatabase();
+            const actionText = action === "progress" ? "marked as In Progress" : "completed";
+            showToast(`Task was successfully ${actionText}.`, "success");
+            await addLog(`Employee (${currentUser.name}) updated task status of "${task.title}" to ${action}.`, "info");
+        } catch (err) {
+            showToast("Error updating task status: " + err.message, "error");
+        }
 
         // Re-render task board based on active filter
         const activeFilterBtn = document.querySelector(".task-filter-btn.active");
@@ -1043,7 +1140,7 @@
         });
     }
 
-    function handleSubmitReport(e) {
+    async function handleSubmitReport(e) {
         e.preventDefault();
 
         const reportText = document.getElementById("report-text").value.trim();
@@ -1056,14 +1153,22 @@
             text: reportText
         };
 
-        db.reports.push(newReport);
-        saveDatabase();
-
-        showToast("Daily status report logged successfully.", "success");
-        addLog(`Employee (${currentUser.name}) logged daily status report.`, "info");
-
-        document.getElementById("report-text").value = "";
-        renderEmployeeReportsTable();
+        try {
+            const res = await fetch('/api/reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newReport)
+            });
+            if (!res.ok) throw new Error("Failed to submit report on server");
+            
+            await syncDatabase();
+            showToast("Daily status report logged successfully.", "success");
+            await addLog(`Employee (${currentUser.name}) logged daily status report.`, "info");
+            document.getElementById("report-text").value = "";
+            renderEmployeeReportsTable();
+        } catch (err) {
+            showToast("Error submitting report: " + err.message, "error");
+        }
     }
 
     // Expose routing globally for navigation helpers
