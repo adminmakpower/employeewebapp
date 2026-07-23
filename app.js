@@ -1887,14 +1887,15 @@
     }
 
     function formatRemarksTimestamp(text) {
-        if (!text) return '<span style="color:var(--color-dark-muted);">—</span>';
+        const textStr = String(text || '').trim();
+        if (!textStr) return '<span style="color:var(--color-dark-muted);">—</span>';
         
-        let remarks = text;
+        let remarks = textStr;
         let details = '';
         let timestamp = '';
         
-        if (text.includes('^')) {
-            const parts = text.split('^');
+        if (textStr.includes('^')) {
+            const parts = textStr.split('^');
             remarks = parts[0].trim();
             timestamp = parts[1].trim();
         }
@@ -1921,14 +1922,18 @@
         if (!tbody) return;
         tbody.innerHTML = "";
 
-        let filteredOrders = db.orders;
+        let filteredOrders = db.orders || [];
         if (filterQuery) {
-            filteredOrders = db.orders.filter(ord => 
-                ord.id.toLowerCase().includes(filterQuery) ||
-                ord.orderNo.toLowerCase().includes(filterQuery) ||
-                ord.itemName.toLowerCase().includes(filterQuery) ||
-                ord.partyName.toLowerCase().includes(filterQuery)
-            );
+            filteredOrders = (db.orders || []).filter(ord => {
+                const id = String(ord.id || '').toLowerCase();
+                const orderNo = String(ord.orderNo || '').toLowerCase();
+                const itemName = String(ord.itemName || '').toLowerCase();
+                const partyName = String(ord.partyName || '').toLowerCase();
+                return id.includes(filterQuery) || 
+                       orderNo.includes(filterQuery) || 
+                       itemName.includes(filterQuery) || 
+                       partyName.includes(filterQuery);
+            });
         }
 
         if (filteredOrders.length === 0) {
@@ -1983,17 +1988,28 @@
 
         pageOrders.forEach(ord => {
             const tr = document.createElement("tr");
+            
+            const idStr = String(ord.id || '');
+            const orderNoStr = String(ord.orderNo || '');
+            const itemNameStr = String(ord.itemName || '');
+            const qtyVal = ord.qty || 0;
+            const amtStr = String(ord.amt || '');
+            const dateStr = String(ord.date || '');
+            const partyNameStr = String(ord.partyName || '');
+            
+            const badgeClass = amtStr.toLowerCase().includes('not') ? 'badge-suspended' : 'badge-success';
+
             tr.innerHTML = `
-                <td style="font-family: monospace; font-size:11px; color: var(--color-dark-muted); padding: 12px 16px;">${ord.id}</td>
-                <td style="font-weight:700; color: var(--color-dark);">${ord.orderNo}</td>
-                <td style="font-weight:600; color: var(--color-primary);">${ord.itemName}</td>
-                <td><span style="font-weight:700; color:var(--color-dark);">${ord.qty}</span></td>
-                <td><span class="badge ${ord.amt.toLowerCase().includes('not') ? 'badge-suspended' : 'badge-success'}">${ord.amt}</span></td>
-                <td style="white-space:nowrap;">${ord.date}</td>
-                <td style="font-weight:600; color: var(--color-dark-light);">${ord.partyName}</td>
+                <td style="font-family: monospace; font-size:11px; color: var(--color-dark-muted); padding: 12px 16px;">${idStr}</td>
+                <td style="font-weight:700; color: var(--color-dark);">${orderNoStr}</td>
+                <td style="font-weight:600; color: var(--color-primary);">${itemNameStr}</td>
+                <td><span style="font-weight:700; color:var(--color-dark);">${qtyVal}</span></td>
+                <td><span class="badge ${badgeClass}">${amtStr}</span></td>
+                <td style="white-space:nowrap;">${dateStr}</td>
+                <td style="font-weight:600; color: var(--color-dark-light);">${partyNameStr}</td>
                 <td style="max-width:220px; vertical-align:top; padding:10px 16px;">${formatRemarksTimestamp(ord.remarksTimestamp)}</td>
                 <td style="text-align: right; padding: 12px 16px;">
-                    <button class="btn btn-icon delete-order-btn" data-id="${ord.id}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);">
+                    <button class="btn btn-icon delete-order-btn" data-id="${idStr}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);">
                         <i data-lucide="trash-2" style="width:16px; height:16px;"></i>
                     </button>
                 </td>
