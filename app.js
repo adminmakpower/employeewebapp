@@ -1738,6 +1738,31 @@
                     </div>
                 </div>
 
+                <!-- Google Sheets Auto-Sync Card -->
+                <div class="panel-card col-4" style="margin-top: 20px;">
+                    <div class="panel-header">
+                        <h2>Google Sheet Auto-Sync</h2>
+                    </div>
+                    <div class="panel-body">
+                        <p style="font-size: 13px; color: var(--color-dark-muted); margin-bottom: 16px;">
+                            Sync orders automatically. Publish your Google Sheet to the web as a <strong>CSV</strong> and paste the link below:
+                        </p>
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 700; color: var(--color-dark); margin-bottom: 6px;">Google Sheet CSV URL</label>
+                            <input type="text" id="google-sheet-url-input" class="form-control" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv" style="font-size: 13px;">
+                        </div>
+                        <div style="display: flex; gap: 8px; margin-top: 14px;">
+                            <button id="save-sheet-url-btn" class="btn btn-outline" style="flex: 1; padding: 8px 12px; font-size: 13px;">Save URL</button>
+                            <button id="sync-sheet-now-btn" class="btn btn-primary" style="flex: 1; padding: 8px 12px; font-size: 13px; display:inline-flex; align-items:center; justify-content:center; gap:6px;">
+                                <i data-lucide="refresh-cw" style="width:14px; height:14px;"></i> Sync Now
+                            </button>
+                        </div>
+                        <p style="font-size: 11px; color: var(--color-primary); margin-top: 12px; font-style: italic;">
+                            * Note: The portal automatically checks and syncs this sheet every 15 minutes.
+                        </p>
+                    </div>
+                </div>
+
                 <!-- Orders List Card -->
                 <div class="panel-card col-8">
                     <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
@@ -1882,6 +1907,68 @@
             searchInput.addEventListener("input", () => {
                 ordersCurrentPage = 1;
                 renderOrdersTableRows(searchInput.value.trim().toLowerCase());
+            });
+        }
+
+        // Google Sheet URL settings and Sync handler
+        const sheetUrlInput = document.getElementById("google-sheet-url-input");
+        const saveSheetBtn = document.getElementById("save-sheet-url-btn");
+        const syncSheetBtn = document.getElementById("sync-sheet-now-btn");
+
+        if (sheetUrlInput && saveSheetBtn && syncSheetBtn) {
+            // Load existing Google Sheet URL
+            fetch('/api/settings/google-sheet-url')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.url) sheetUrlInput.value = data.url;
+                })
+                .catch(err => console.error("Failed to load sheet URL", err));
+
+            // Save URL
+            saveSheetBtn.addEventListener("click", async () => {
+                const url = sheetUrlInput.value.trim();
+                saveSheetBtn.disabled = true;
+                saveSheetBtn.textContent = "Saving...";
+
+                try {
+                    const res = await fetch('/api/settings/google-sheet-url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url })
+                    });
+                    if (!res.ok) throw new Error("Failed to save settings on server");
+                    showToast("Google Sheet URL saved successfully!", "success");
+                } catch (err) {
+                    showToast("Error saving URL: " + err.message, "error");
+                } finally {
+                    saveSheetBtn.disabled = false;
+                    saveSheetBtn.textContent = "Save URL";
+                }
+            });
+
+            // Trigger manual Sync
+            syncSheetBtn.addEventListener("click", async () => {
+                syncSheetBtn.disabled = true;
+                syncSheetBtn.innerHTML = '<i data-lucide="refresh-cw" class="spin-icon" style="width:14px; height:14px;"></i> Syncing...';
+                lucide.createIcons();
+
+                try {
+                    const res = await fetch('/api/orders/sync-sheet', { method: 'POST' });
+                    const result = await res.json();
+                    
+                    if (!res.ok) throw new Error(result.message || result.error || "Sync failed");
+                    
+                    await syncDatabase();
+                    showToast(result.message || "Successfully synced orders from Google Sheet!", "success");
+                    await addLog(`User (${currentUser.name}) manually synced orders from Google Sheets.`, "info");
+                    renderOrdersTableRows();
+                } catch (err) {
+                    showToast("Sync error: " + err.message, "error");
+                } finally {
+                    syncSheetBtn.disabled = false;
+                    syncSheetBtn.innerHTML = '<i data-lucide="refresh-cw" style="width:14px; height:14px;"></i> Sync Now';
+                    lucide.createIcons();
+                }
             });
         }
     }

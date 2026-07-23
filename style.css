@@ -1234,3 +1234,12 @@ button, input, select, textarea {
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
 }
+
+.spin-icon {
+    animation: spin-anim 1s linear infinite;
+}
+
+@keyframes spin-anim {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}

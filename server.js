@@ -673,111 +673,7 @@ app.post('/api/orders', async (req, res) => {
       return res.status(201).json({ message: 'No orders to save' });
     }
 
-    // 1. Get all existing items to build name-to-id mapping
-    const allItemsRes = await client.query('SELECT id, name FROM items');
-    const itemMap = new Map();
-    allItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
-
-    // 2. Identify missing items in the uploaded orders
-    const missingNames = new Set();
-    for (const order of ordersToInsert) {
-      if (order.itemName) {
-        const nameClean = order.itemName.toLowerCase().trim();
-        if (!itemMap.has(nameClean)) {
-          missingNames.add(order.itemName.trim());
-        }
-      }
-    }
-
-    // 3. Bulk insert missing items if any (batched to prevent parameter format limit)
-    if (missingNames.size > 0) {
-      writeToLogFile('info', `Found ${missingNames.size} missing items in order upload. Registering them...`);
-      const missingArray = Array.from(missingNames);
-      const ITEM_BATCH_SIZE = 10000;
-      
-      for (let i = 0; i < missingArray.length; i += ITEM_BATCH_SIZE) {
-        const batch = missingArray.slice(i, i + ITEM_BATCH_SIZE);
-        const valPlaceholders = [];
-        const valParams = [];
-        let iCounter = 1;
-        for (const name of batch) {
-          valPlaceholders.push(`($${iCounter}, 'Others')`);
-          valParams.push(name);
-          iCounter++;
-        }
-        
-        const insertItemsQuery = `
-          INSERT INTO items (name, category) 
-          VALUES ${valPlaceholders.join(', ')} 
-          ON CONFLICT (name) DO NOTHING 
-          RETURNING id, name
-        `;
-        const insertItemsRes = await client.query(insertItemsQuery, valParams);
-        
-        // Update our map with the newly inserted items
-        insertItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
-        writeToLogFile('info', `Registered ${insertItemsRes.rows.length} new items from this batch.`);
-        
-        // Bulk insert history logs for these new items
-        if (insertItemsRes.rows.length > 0) {
-          const hPlaceholders = [];
-          const hParams = [];
-          let hCounter = 1;
-          for (const r of insertItemsRes.rows) {
-            hPlaceholders.push(`($${hCounter}, 'create', 'Item created via orders import')`);
-            hParams.push(r.id);
-            hCounter += 1;
-          }
-          await client.query(
-            `INSERT INTO item_history (item_id, action, details) VALUES ${hPlaceholders.join(', ')}`,
-            hParams
-          );
-        }
-      }
-    }
-
-    // 4. Construct values and placeholders for bulk inserting orders in batches
-    // Batch size of 5000 to prevent exceeding PostgreSQL's 65535 parameter formats limit (each order has 7 parameters)
-    const ORDER_BATCH_SIZE = 5000;
-    
-    for (let i = 0; i < ordersToInsert.length; i += ORDER_BATCH_SIZE) {
-      const batch = ordersToInsert.slice(i, i + ORDER_BATCH_SIZE);
-      const valueParams = [];
-      const valuePlaceholders = [];
-      let counter = 1;
-      
-      for (const order of batch) {
-        const { itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
-        
-        const nameClean = itemName ? itemName.toLowerCase().trim() : '';
-        const itemId = itemMap.get(nameClean);
-        
-        if (!itemId) {
-          continue;
-        }
-        
-        valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6})`);
-        valueParams.push(
-          itemId, 
-          parseInt(qty, 10) || 0, 
-          amt ? amt.trim() : '', 
-          date ? date.trim() : '', 
-          partyName ? partyName.trim() : '', 
-          orderNo ? orderNo.trim() : '', 
-          remarksTimestamp ? remarksTimestamp.trim() : ''
-        );
-        counter += 7;
-      }
-      
-      if (valueParams.length > 0) {
-        const insertQuery = `
-          INSERT INTO new_orders (item_id, qty, amt, date, party_name, order_no, remarks_timestamp) 
-          VALUES ${valuePlaceholders.join(', ')}
-        `;
-        await client.query(insertQuery, valueParams);
-        writeToLogFile('info', `Batch insert: successfully saved ${valueParams.length / 7} orders.`);
-      }
-    }
+    await saveOrdersInternal(client, ordersToInsert);
     
     await client.query('COMMIT');
     writeToLogFile('info', 'Successfully committed transaction and saved all orders.');
@@ -790,6 +686,290 @@ app.post('/api/orders', async (req, res) => {
     if (client) client.release();
   }
 });
+
+async function saveOrdersInternal(client, ordersToInsert) {
+  // 1. Get all existing items to build name-to-id mapping
+  const allItemsRes = await client.query('SELECT id, name FROM items');
+  const itemMap = new Map();
+  allItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
+
+  // 2. Identify missing items in the uploaded orders
+  const missingNames = new Set();
+  for (const order of ordersToInsert) {
+    if (order.itemName) {
+      const nameClean = order.itemName.toLowerCase().trim();
+      if (!itemMap.has(nameClean)) {
+        missingNames.add(order.itemName.trim());
+      }
+    }
+  }
+
+  // 3. Bulk insert missing items if any (batched to prevent parameter format limit)
+  if (missingNames.size > 0) {
+    writeToLogFile('info', `Found ${missingNames.size} missing items in order upload. Registering them...`);
+    const missingArray = Array.from(missingNames);
+    const ITEM_BATCH_SIZE = 10000;
+    
+    for (let i = 0; i < missingArray.length; i += ITEM_BATCH_SIZE) {
+      const batch = missingArray.slice(i, i + ITEM_BATCH_SIZE);
+      const valPlaceholders = [];
+      const valParams = [];
+      let iCounter = 1;
+      for (const name of batch) {
+        valPlaceholders.push(`($${iCounter}, 'Others')`);
+        valParams.push(name);
+        iCounter++;
+      }
+      
+      const insertItemsQuery = `
+        INSERT INTO items (name, category) 
+        VALUES ${valPlaceholders.join(', ')} 
+        ON CONFLICT (name) DO NOTHING 
+        RETURNING id, name
+      `;
+      const insertItemsRes = await client.query(insertItemsQuery, valParams);
+      
+      // Update our map with the newly inserted items
+      insertItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
+      writeToLogFile('info', `Registered ${insertItemsRes.rows.length} new items from this batch.`);
+      
+      // Bulk insert history logs for these new items
+      if (insertItemsRes.rows.length > 0) {
+        const hPlaceholders = [];
+        const hParams = [];
+        let hCounter = 1;
+        for (const r of insertItemsRes.rows) {
+          hPlaceholders.push(`($${hCounter}, 'create', 'Item created via orders import')`);
+          hParams.push(r.id);
+          hCounter += 1;
+        }
+        await client.query(
+          `INSERT INTO item_history (item_id, action, details) VALUES ${hPlaceholders.join(', ')}`,
+          hParams
+        );
+      }
+    }
+  }
+
+  // 4. Construct values and placeholders for bulk inserting orders in batches
+  // Batch size of 5000 to prevent exceeding PostgreSQL's 65535 parameter formats limit (each order has 7 parameters)
+  const ORDER_BATCH_SIZE = 5000;
+  
+  for (let i = 0; i < ordersToInsert.length; i += ORDER_BATCH_SIZE) {
+    const batch = ordersToInsert.slice(i, i + ORDER_BATCH_SIZE);
+    const valueParams = [];
+    const valuePlaceholders = [];
+    let counter = 1;
+    
+    for (const order of batch) {
+      const { itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
+      
+      const nameClean = itemName ? itemName.toLowerCase().trim() : '';
+      const itemId = itemMap.get(nameClean);
+      
+      if (!itemId) {
+        continue;
+      }
+      
+      valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6})`);
+      valueParams.push(
+        itemId, 
+        parseInt(qty, 10) || 0, 
+        amt ? amt.trim() : '', 
+        date ? date.trim() : '', 
+        partyName ? partyName.trim() : '', 
+        orderNo ? orderNo.trim() : '', 
+        remarksTimestamp ? remarksTimestamp.trim() : ''
+      );
+      counter += 7;
+    }
+    
+    if (valueParams.length > 0) {
+      const insertQuery = `
+        INSERT INTO new_orders (item_id, qty, amt, date, party_name, order_no, remarks_timestamp) 
+        VALUES ${valuePlaceholders.join(', ')}
+      `;
+      await client.query(insertQuery, valueParams);
+      writeToLogFile('info', `Batch insert: successfully saved ${valueParams.length / 7} orders.`);
+    }
+  }
+}
+
+// CSV parser helper
+function parseCSV(text) {
+  const lines = [];
+  let row = [""];
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const next = text[i+1];
+    if (c === '"') {
+      if (inQuotes && next === '"') {
+        row[row.length - 1] += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (c === ',' && !inQuotes) {
+      row.push('');
+    } else if ((c === '\r' || c === '\n') && !inQuotes) {
+      if (c === '\r' && next === '\n') {
+        i++;
+      }
+      lines.push(row);
+      row = [''];
+    } else {
+      row[row.length - 1] += c;
+    }
+  }
+  if (row.length > 1 || row[0] !== '') {
+    lines.push(row);
+  }
+  return lines;
+}
+
+// Backend version of formatExcelDate
+function formatExcelDateBackend(val) {
+  if (val === undefined || val === null) return '';
+  const num = Number(val);
+  if (!isNaN(num) && num > 30000 && num < 60000) {
+    const date = new Date((num - 25569) * 86400 * 1000);
+    const yyyy = date.getFullYear();
+    let mm = date.getMonth() + 1;
+    let dd = date.getDate();
+    if (mm < 10) mm = '0' + mm;
+    if (dd < 10) dd = '0' + dd;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return String(val).trim();
+}
+
+// Google Sheets Sync function
+async function syncGoogleSheet() {
+  try {
+    const settingsRes = await pool.query("SELECT value FROM system_settings WHERE key = 'google_sheet_url'");
+    if (settingsRes.rows.length === 0 || !settingsRes.rows[0].value) {
+      return { success: false, message: 'Google Sheet URL not configured.' };
+    }
+    const url = settingsRes.rows[0].value;
+    
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Failed to fetch sheet: ${response.statusText}`);
+    const csvText = await response.text();
+    
+    const rows = parseCSV(csvText);
+    if (rows.length < 2) {
+      return { success: false, message: 'Empty sheet or invalid CSV.' };
+    }
+    
+    const headers = rows[0].map(h => h.trim().toLowerCase().replace(/[\s_&]/g, ''));
+    const dataRows = rows.slice(1);
+    
+    const findIndex = (candidates) => {
+      return headers.findIndex(h => candidates.includes(h));
+    };
+    
+    const itemIdx = findIndex(['itemname', 'item']);
+    const qtyIdx = findIndex(['qty', 'quantity']);
+    const amtIdx = findIndex(['amt', 'amount', 'scheme']);
+    const dateIdx = findIndex(['date', 'orderdate']);
+    const partyIdx = findIndex(['partyname', 'party']);
+    const orderNoIdx = findIndex(['orderno', 'ordernumber']);
+    const remarksIdx = findIndex(['remarkstimestamp', 'remarks', 'timestamp']);
+    
+    if (itemIdx === -1 || partyIdx === -1) {
+      return { success: false, message: 'Required headers (Item Name, Party Name) not found in Google Sheet.' };
+    }
+    
+    const ordersToInsert = [];
+    for (const r of dataRows) {
+      const itemName = r[itemIdx];
+      const partyName = r[partyIdx];
+      if (!itemName || !partyName) continue;
+      
+      ordersToInsert.push({
+        itemName: itemName.trim(),
+        qty: parseInt(r[qtyIdx], 10) || 0,
+        amt: amtIdx !== -1 ? r[amtIdx].trim() : '',
+        date: dateIdx !== -1 ? formatExcelDateBackend(r[dateIdx]) : new Date().toISOString().split('T')[0],
+        partyName: partyName.trim(),
+        orderNo: orderNoIdx !== -1 ? r[orderNoIdx].trim() : '',
+        remarksTimestamp: remarksIdx !== -1 ? r[remarksIdx].trim() : ''
+      });
+    }
+    
+    if (ordersToInsert.length === 0) {
+      return { success: true, message: 'No valid orders to import.', count: 0 };
+    }
+    
+    let client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Delete existing orders to ensure 1-to-1 sync
+      await client.query('DELETE FROM new_orders');
+      
+      await saveOrdersInternal(client, ordersToInsert);
+      
+      await client.query('COMMIT');
+      writeToLogFile('info', `Google Sheet Auto-Sync: successfully imported ${ordersToInsert.length} orders.`);
+      return { success: true, message: `Successfully synced ${ordersToInsert.length} orders!`, count: ordersToInsert.length };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    writeToLogFile('error', `Google Sheet Auto-Sync failed: ${err.stack}`);
+    return { success: false, error: err.message };
+  }
+}
+
+// Google Sheets endpoints
+app.get('/api/settings/google-sheet-url', async (req, res) => {
+  try {
+    const result = await pool.query("SELECT value FROM system_settings WHERE key = 'google_sheet_url'");
+    res.json({ url: result.rows.length > 0 ? result.rows[0].value : '' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/settings/google-sheet-url', async (req, res) => {
+  const { url } = req.body;
+  try {
+    await pool.query(`
+      INSERT INTO system_settings (key, value) VALUES ('google_sheet_url', $1)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `, [url || '']);
+    writeToLogFile('info', `Google Sheet URL updated to: ${url}`);
+    res.json({ success: true, message: 'Settings saved successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/orders/sync-sheet', async (req, res) => {
+  writeToLogFile('info', 'Manual Google Sheet sync triggered by user.');
+  const result = await syncGoogleSheet();
+  if (result.success) {
+    res.json(result);
+  } else {
+    res.status(400).json(result);
+  }
+});
+
+// Auto-sync Google Sheet every 15 minutes in background
+setInterval(async () => {
+  try {
+    writeToLogFile('info', 'Auto-Sync: starting Google Sheet import check...');
+    const result = await syncGoogleSheet();
+    writeToLogFile('info', `Auto-Sync result: ${JSON.stringify(result)}`);
+  } catch (err) {
+    writeToLogFile('error', `Auto-Sync background interval error: ${err.message}`);
+  }
+}, 15 * 60 * 1000);
 
 app.delete('/api/orders/:id', async (req, res) => {
   const { id } = req.params;
