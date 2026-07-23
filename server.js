@@ -413,8 +413,9 @@ app.get('/api/items', async (req, res) => {
 
 app.post('/api/items', async (req, res) => {
   const body = req.body;
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const itemsToInsert = Array.isArray(body) ? body : [body];
     
@@ -425,6 +426,7 @@ app.post('/api/items', async (req, res) => {
         if (Array.isArray(body)) {
           continue; // Skip duplicate item names in bulk upload
         } else {
+          if (client) await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Item with this name already exists' });
         }
       }
@@ -437,11 +439,11 @@ app.post('/api/items', async (req, res) => {
     await client.query('COMMIT');
     res.status(201).json({ message: 'Items saved successfully' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) await client.query('ROLLBACK');
     console.error("Error saving items:", err);
     res.status(500).json({ error: 'Failed to save items: ' + err.message });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -481,8 +483,9 @@ app.get('/api/orders', async (req, res) => {
 
 app.post('/api/orders', async (req, res) => {
   const body = req.body;
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const ordersToInsert = Array.isArray(body) ? body : [body];
     
@@ -499,11 +502,11 @@ app.post('/api/orders', async (req, res) => {
     await client.query('COMMIT');
     res.status(201).json({ message: 'Orders saved successfully' });
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ error: 'Failed to save orders' });
+    if (client) await client.query('ROLLBACK');
+    console.error("Error saving orders:", err);
+    res.status(500).json({ error: 'Failed to save orders: ' + err.message });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
