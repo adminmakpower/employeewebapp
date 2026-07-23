@@ -9,7 +9,8 @@ const PORT = process.env.PORT || 5000;
 
 // Enable CORS and JSON parsing
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Database connection config
 const isLocal = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
@@ -466,48 +467,54 @@ app.post('/api/items', async (req, res) => {
       return res.status(201).json({ message: 'No items to save' });
     }
 
-    const valueParams = [];
-    const valuePlaceholders = [];
-    let counter = 1;
+    // Batch items in chunks of 10000 to prevent exceeding PostgreSQL's 65535 parameter formats limit (each item has 2 parameters)
+    const BATCH_SIZE = 10000;
     
-    for (const item of itemsToInsert) {
-      if (!item.name) continue;
-      valuePlaceholders.push(`($${counter}, $${counter + 1})`);
-      valueParams.push(item.name.trim(), item.category || 'Others');
-      counter += 2;
-    }
+    for (let i = 0; i < itemsToInsert.length; i += BATCH_SIZE) {
+      const batch = itemsToInsert.slice(i, i + BATCH_SIZE);
+      const valueParams = [];
+      const valuePlaceholders = [];
+      let counter = 1;
+      
+      for (const item of batch) {
+        if (!item.name) continue;
+        valuePlaceholders.push(`($${counter}, $${counter + 1})`);
+        valueParams.push(item.name.trim(), item.category || 'Others');
+        counter += 2;
+      }
 
-    if (valueParams.length > 0) {
-      const insertQuery = `
-        INSERT INTO items (name, category) 
-        VALUES ${valuePlaceholders.join(', ')} 
-        ON CONFLICT (name) DO NOTHING 
-        RETURNING id, name
-      `;
-      const insertRes = await client.query(insertQuery, valueParams);
-      const insertedItems = insertRes.rows;
-
-      if (insertedItems.length > 0) {
-        const historyParams = [];
-        const historyPlaceholders = [];
-        let hCounter = 1;
-        const importMethod = Array.isArray(body) ? 'bulk import' : 'manual addition';
-        
-        for (const item of insertedItems) {
-          historyPlaceholders.push(`($${hCounter}, 'create', $${hCounter + 1})`);
-          historyParams.push(item.id, `Item created via ${importMethod}`);
-          hCounter += 2;
-        }
-
-        const historyQuery = `
-          INSERT INTO item_history (item_id, action, details) 
-          VALUES ${historyPlaceholders.join(', ')}
+      if (valueParams.length > 0) {
+        const insertQuery = `
+          INSERT INTO items (name, category) 
+          VALUES ${valuePlaceholders.join(', ')} 
+          ON CONFLICT (name) DO NOTHING 
+          RETURNING id, name
         `;
-        await client.query(historyQuery, historyParams);
-      } else {
-        if (!Array.isArray(body)) {
-          if (client) await client.query('ROLLBACK');
-          return res.status(400).json({ error: 'Item with this name already exists' });
+        const insertRes = await client.query(insertQuery, valueParams);
+        const insertedItems = insertRes.rows;
+
+        if (insertedItems.length > 0) {
+          const historyParams = [];
+          const historyPlaceholders = [];
+          let hCounter = 1;
+          const importMethod = Array.isArray(body) ? 'bulk import' : 'manual addition';
+          
+          for (const item of insertedItems) {
+            historyPlaceholders.push(`($${hCounter}, 'create', $${hCounter + 1})`);
+            historyParams.push(item.id, `Item created via ${importMethod}`);
+            hCounter += 2;
+          }
+
+          const historyQuery = `
+            INSERT INTO item_history (item_id, action, details) 
+            VALUES ${historyPlaceholders.join(', ')}
+          `;
+          await client.query(historyQuery, historyParams);
+        } else {
+          if (!Array.isArray(body)) {
+            if (client) await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Item with this name already exists' });
+          }
         }
       }
     }
@@ -657,91 +664,102 @@ app.post('/api/orders', async (req, res) => {
       }
     }
 
-    // 3. Bulk insert missing items if any
+    // 3. Bulk insert missing items if any (batched to prevent parameter format limit)
     if (missingNames.size > 0) {
       const missingArray = Array.from(missingNames);
-      const valPlaceholders = [];
-      const valParams = [];
-      let iCounter = 1;
-      for (const name of missingArray) {
-        valPlaceholders.push(`($${iCounter}, 'Others')`);
-        valParams.push(name);
-        iCounter++;
-      }
+      const ITEM_BATCH_SIZE = 10000;
       
-      const insertItemsQuery = `
-        INSERT INTO items (name, category) 
-        VALUES ${valPlaceholders.join(', ')} 
-        ON CONFLICT (name) DO NOTHING 
-        RETURNING id, name
-      `;
-      const insertItemsRes = await client.query(insertItemsQuery, valParams);
-      
-      // Update our map with the newly inserted items
-      insertItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
-      
-      // Bulk insert history logs for these new items
-      if (insertItemsRes.rows.length > 0) {
-        const hPlaceholders = [];
-        const hParams = [];
-        let hCounter = 1;
-        for (const r of insertItemsRes.rows) {
-          hPlaceholders.push(`($${hCounter}, 'create', 'Item created via orders import')`);
-          hParams.push(r.id);
-          hCounter += 1;
+      for (let i = 0; i < missingArray.length; i += ITEM_BATCH_SIZE) {
+        const batch = missingArray.slice(i, i + ITEM_BATCH_SIZE);
+        const valPlaceholders = [];
+        const valParams = [];
+        let iCounter = 1;
+        for (const name of batch) {
+          valPlaceholders.push(`($${iCounter}, 'Others')`);
+          valParams.push(name);
+          iCounter++;
         }
-        await client.query(
-          `INSERT INTO item_history (item_id, action, details) VALUES ${hPlaceholders.join(', ')}`,
-          hParams
-        );
+        
+        const insertItemsQuery = `
+          INSERT INTO items (name, category) 
+          VALUES ${valPlaceholders.join(', ')} 
+          ON CONFLICT (name) DO NOTHING 
+          RETURNING id, name
+        `;
+        const insertItemsRes = await client.query(insertItemsQuery, valParams);
+        
+        // Update our map with the newly inserted items
+        insertItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
+        
+        // Bulk insert history logs for these new items
+        if (insertItemsRes.rows.length > 0) {
+          const hPlaceholders = [];
+          const hParams = [];
+          let hCounter = 1;
+          for (const r of insertItemsRes.rows) {
+            hPlaceholders.push(`($${hCounter}, 'create', 'Item created via orders import')`);
+            hParams.push(r.id);
+            hCounter += 1;
+          }
+          await client.query(
+            `INSERT INTO item_history (item_id, action, details) VALUES ${hPlaceholders.join(', ')}`,
+            hParams
+          );
+        }
       }
     }
 
-    // 4. Construct values and placeholders for bulk inserting orders
-    const valueParams = [];
-    const valuePlaceholders = [];
-    let counter = 1;
+    // 4. Construct values and placeholders for bulk inserting orders in batches
+    // Batch size of 5000 to prevent exceeding PostgreSQL's 65535 parameter formats limit (each order has 8 parameters)
+    const ORDER_BATCH_SIZE = 5000;
     
-    for (const order of ordersToInsert) {
-      const { id, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
-      const finalId = id || ('O-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + counter);
+    for (let i = 0; i < ordersToInsert.length; i += ORDER_BATCH_SIZE) {
+      const batch = ordersToInsert.slice(i, i + ORDER_BATCH_SIZE);
+      const valueParams = [];
+      const valuePlaceholders = [];
+      let counter = 1;
       
-      const nameClean = itemName ? itemName.toLowerCase().trim() : '';
-      const itemId = itemMap.get(nameClean);
-      
-      if (!itemId) {
-        // Skipping orders with empty item names that didn't resolve to any ID
-        continue;
+      for (const order of batch) {
+        const { id, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
+        const finalId = id || ('O-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + (i + counter));
+        
+        const nameClean = itemName ? itemName.toLowerCase().trim() : '';
+        const itemId = itemMap.get(nameClean);
+        
+        if (!itemId) {
+          // Skipping orders with empty item names that didn't resolve to any ID
+          continue;
+        }
+        
+        valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6}, $${counter+7})`);
+        valueParams.push(
+          finalId, 
+          itemId, 
+          parseInt(qty, 10) || 0, 
+          amt ? amt.trim() : '', 
+          date ? date.trim() : '', 
+          partyName ? partyName.trim() : '', 
+          orderNo ? orderNo.trim() : '', 
+          remarksTimestamp ? remarksTimestamp.trim() : ''
+        );
+        counter += 8;
       }
       
-      valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6}, $${counter+7})`);
-      valueParams.push(
-        finalId, 
-        itemId, 
-        parseInt(qty, 10) || 0, 
-        amt ? amt.trim() : '', 
-        date ? date.trim() : '', 
-        partyName ? partyName.trim() : '', 
-        orderNo ? orderNo.trim() : '', 
-        remarksTimestamp ? remarksTimestamp.trim() : ''
-      );
-      counter += 8;
-    }
-    
-    if (valueParams.length > 0) {
-      const insertQuery = `
-        INSERT INTO new_orders (id, item_id, qty, amt, date, party_name, order_no, remarks_timestamp) 
-        VALUES ${valuePlaceholders.join(', ')} 
-        ON CONFLICT (id) DO UPDATE SET 
-          item_id = EXCLUDED.item_id, 
-          qty = EXCLUDED.qty, 
-          amt = EXCLUDED.amt, 
-          date = EXCLUDED.date, 
-          party_name = EXCLUDED.party_name, 
-          order_no = EXCLUDED.order_no, 
-          remarks_timestamp = EXCLUDED.remarks_timestamp
-      `;
-      await client.query(insertQuery, valueParams);
+      if (valueParams.length > 0) {
+        const insertQuery = `
+          INSERT INTO new_orders (id, item_id, qty, amt, date, party_name, order_no, remarks_timestamp) 
+          VALUES ${valuePlaceholders.join(', ')} 
+          ON CONFLICT (id) DO UPDATE SET 
+            item_id = EXCLUDED.item_id, 
+            qty = EXCLUDED.qty, 
+            amt = EXCLUDED.amt, 
+            date = EXCLUDED.date, 
+            party_name = EXCLUDED.party_name, 
+            order_no = EXCLUDED.order_no, 
+            remarks_timestamp = EXCLUDED.remarks_timestamp
+        `;
+        await client.query(insertQuery, valueParams);
+      }
     }
     
     await client.query('COMMIT');
