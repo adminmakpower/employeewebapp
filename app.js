@@ -1858,6 +1858,35 @@
         }
     }
 
+    function formatRemarksTimestamp(text) {
+        if (!text) return '<span style="color:var(--color-dark-muted);">—</span>';
+        
+        let remarks = text;
+        let details = '';
+        let timestamp = '';
+        
+        if (text.includes('^')) {
+            const parts = text.split('^');
+            remarks = parts[0].trim();
+            timestamp = parts[1].trim();
+        }
+        
+        if (remarks.includes('@@')) {
+            const parts = remarks.split('@@');
+            remarks = parts[0].trim();
+            details = parts[1].trim();
+        }
+        
+        let html = `<div style="font-weight:600; color:var(--color-dark);">${remarks}</div>`;
+        if (details) {
+            html += `<div style="font-size:11px; color:var(--color-dark-light); margin-top:2px;">${details}</div>`;
+        }
+        if (timestamp) {
+            html += `<div style="font-size:10px; font-family:monospace; color:var(--color-primary); margin-top:4px;">${timestamp}</div>`;
+        }
+        return html;
+    }
+
     function renderOrdersTableRows(filterQuery = "") {
         const tbody = document.getElementById("orders-table-body");
         if (!tbody) return;
@@ -1888,7 +1917,7 @@
                 <td><span class="badge ${ord.amt.toLowerCase().includes('not') ? 'badge-suspended' : 'badge-success'}">${ord.amt}</span></td>
                 <td style="white-space:nowrap;">${ord.date}</td>
                 <td style="font-weight:600; color: var(--color-dark-light);">${ord.partyName}</td>
-                <td style="font-size:12px; color: var(--color-dark-muted); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${ord.remarksTimestamp}">${ord.remarksTimestamp}</td>
+                <td style="max-width:220px; vertical-align:top; padding:10px 16px;">${formatRemarksTimestamp(ord.remarksTimestamp)}</td>
                 <td style="text-align: right;">
                     <button class="btn btn-icon delete-order-btn" data-id="${ord.id}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);">
                         <i data-lucide="trash-2" style="width:16px; height:16px;"></i>
