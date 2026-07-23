@@ -1778,6 +1778,7 @@
                                     <tr>
                                         <th style="padding: 12px 16px;">ID</th>
                                         <th>Order NO</th>
+                                        <th>Item ID</th>
                                         <th>Item Name</th>
                                         <th>Qty</th>
                                         <th>AMT (Scheme)</th>
@@ -1834,6 +1835,7 @@
                         };
 
                         const itemKey = findKey(['itemname', 'item']);
+                        const itemIdCodeKey = findKey(['itemid', 'itemcode', 'itemidcode']);
                         const qtyKey = findKey(['qty', 'quantity']);
                         const amtKey = findKey(['amt', 'amount', 'scheme']);
                         const dateKey = findKey(['date', 'orderdate']);
@@ -1845,6 +1847,7 @@
                         return {
                             id: (row[idKey] || row['Id'] || '').toString().trim() || ('O-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + index),
                             itemName: (row[itemKey] || row['Item Name'] || '').toString().trim(),
+                            itemIdCode: (row[itemIdCodeKey] || row['Item ID'] || row['item_id'] || '').toString().trim(),
                             qty: parseInt(row[qtyKey] || row['Qty'] || 0, 10),
                             amt: (row[amtKey] || row['AMT'] || '').toString().trim(),
                             date: formatExcelDate(row[dateKey] || row['Date'] || new Date().toISOString().split('T')[0]),
@@ -2039,7 +2042,7 @@
         }
 
         if (filteredOrders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No orders found. Import your first Excel sheet.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No orders found. Import your first Excel sheet.</td></tr>`;
             if (pagContainer) pagContainer.innerHTML = "";
             return;
         }
@@ -2093,6 +2096,7 @@
             
             const idStr = String(ord.id || '');
             const orderNoStr = String(ord.orderNo || '');
+            const itemIdCodeStr = String(ord.itemIdCode || '<span style="color:var(--color-dark-muted);">—</span>');
             const itemNameStr = String(ord.itemName || '');
             const qtyVal = ord.qty || 0;
             const amtStr = String(ord.amt || '');
@@ -2104,7 +2108,8 @@
             tr.innerHTML = `
                 <td style="font-family: monospace; font-size:11px; color: var(--color-dark-muted); padding: 12px 16px;">${idStr}</td>
                 <td style="font-weight:700; color: var(--color-dark);">${orderNoStr}</td>
-                <td style="font-weight:600; color: var(--color-primary);">${itemNameStr}</td>
+                <td style="font-family: monospace; font-size:11px; font-weight:600; color: var(--color-primary);">${itemIdCodeStr}</td>
+                <td style="font-weight:600; color: var(--color-dark-light);">${itemNameStr}</td>
                 <td><span style="font-weight:700; color:var(--color-dark);">${qtyVal}</span></td>
                 <td><span class="badge ${badgeClass}">${amtStr}</span></td>
                 <td style="white-space:nowrap;">${dateStr}</td>

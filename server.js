@@ -134,9 +134,10 @@ async function initDatabase() {
     const hasItemId = ordersColCheck.rows.some(r => r.column_name === 'item_id');
     const idCol = ordersColCheck.rows.find(r => r.column_name === 'id');
     const isIdVarchar = idCol && idCol.data_type === 'character varying';
+    const hasItemIdCode = ordersColCheck.rows.some(r => r.column_name === 'item_id_code');
     
-    if (!hasItemId || isIdVarchar) {
-      console.log("Migrating new_orders table to support serial integer id and relational item_id...");
+    if (!hasItemId || isIdVarchar || !hasItemIdCode) {
+      console.log("Migrating new_orders table to support item_id_code and serial id...");
       await client.query('DROP TABLE IF EXISTS new_orders CASCADE;');
     }
 
@@ -145,6 +146,7 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS new_orders (
         id SERIAL PRIMARY KEY,
         item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
+        item_id_code VARCHAR(100),
         qty INTEGER NOT NULL,
         amt VARCHAR(100) NOT NULL,
         date VARCHAR(50) NOT NULL,
@@ -640,6 +642,7 @@ app.get('/api/orders', async (req, res) => {
       SELECT 
         o.id, 
         o.item_id AS "itemId",
+        o.item_id_code AS "itemIdCode",
         i.name AS "itemName", 
         o.qty, 
         o.amt, 
@@ -752,7 +755,7 @@ async function saveOrdersInternal(client, ordersToInsert) {
   }
 
   // 4. Construct values and placeholders for bulk inserting orders in batches
-  // Batch size of 5000 to prevent exceeding PostgreSQL's 65535 parameter formats limit (each order has 7 parameters)
+  // Batch size of 5000 to prevent exceeding PostgreSQL's 65535 parameter formats limit (each order has 8 parameters)
   const ORDER_BATCH_SIZE = 5000;
   
   for (let i = 0; i < ordersToInsert.length; i += ORDER_BATCH_SIZE) {
@@ -762,7 +765,7 @@ async function saveOrdersInternal(client, ordersToInsert) {
     let counter = 1;
     
     for (const order of batch) {
-      const { itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
+      const { itemName, itemIdCode, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
       
       const nameClean = itemName ? itemName.toLowerCase().trim() : '';
       const itemId = itemMap.get(nameClean);
@@ -771,9 +774,10 @@ async function saveOrdersInternal(client, ordersToInsert) {
         continue;
       }
       
-      valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6})`);
+      valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6}, $${counter+7})`);
       valueParams.push(
         itemId, 
+        itemIdCode ? itemIdCode.trim() : '',
         parseInt(qty, 10) || 0, 
         amt ? amt.trim() : '', 
         date ? date.trim() : '', 
@@ -781,16 +785,16 @@ async function saveOrdersInternal(client, ordersToInsert) {
         orderNo ? orderNo.trim() : '', 
         remarksTimestamp ? remarksTimestamp.trim() : ''
       );
-      counter += 7;
+      counter += 8;
     }
     
     if (valueParams.length > 0) {
       const insertQuery = `
-        INSERT INTO new_orders (item_id, qty, amt, date, party_name, order_no, remarks_timestamp) 
+        INSERT INTO new_orders (item_id, item_id_code, qty, amt, date, party_name, order_no, remarks_timestamp) 
         VALUES ${valuePlaceholders.join(', ')}
       `;
       await client.query(insertQuery, valueParams);
-      writeToLogFile('info', `Batch insert: successfully saved ${valueParams.length / 7} orders.`);
+      writeToLogFile('info', `Batch insert: successfully saved ${valueParams.length / 8} orders.`);
     }
   }
 }
@@ -870,6 +874,7 @@ async function syncGoogleSheet() {
     };
     
     const itemIdx = findIndex(['itemname', 'item']);
+    const itemIdCodeIdx = findIndex(['itemidcode', 'itemid', 'itemcode']);
     const qtyIdx = findIndex(['qty', 'quantity']);
     const amtIdx = findIndex(['amt', 'amount', 'scheme']);
     const dateIdx = findIndex(['date', 'orderdate']);
@@ -889,6 +894,7 @@ async function syncGoogleSheet() {
       
       ordersToInsert.push({
         itemName: itemName.trim(),
+        itemIdCode: itemIdCodeIdx !== -1 ? r[itemIdCodeIdx].trim() : '',
         qty: parseInt(r[qtyIdx], 10) || 0,
         amt: amtIdx !== -1 ? r[amtIdx].trim() : '',
         date: dateIdx !== -1 ? formatExcelDateBackend(r[dateIdx]) : new Date().toISOString().split('T')[0],
