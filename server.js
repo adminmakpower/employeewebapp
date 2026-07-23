@@ -112,11 +112,21 @@ async function initDatabase() {
       );
     `);
 
-    // 7. New Orders Table (storing Excel imported orders)
+    // 7. Migrating new_orders table if it has the old column layout
+    const ordersColCheck = await client.query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'new_orders' AND column_name = 'item_id';
+    `);
+    if (ordersColCheck.rows.length === 0) {
+      console.log("Migrating new_orders table to support relational item_id...");
+      await client.query('DROP TABLE IF EXISTS new_orders CASCADE;');
+    }
+
+    // 7. New Orders Table (linked to items table via item_id)
     await client.query(`
       CREATE TABLE IF NOT EXISTS new_orders (
         id VARCHAR(50) PRIMARY KEY,
-        item_name VARCHAR(255) NOT NULL,
+        item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
         qty INTEGER NOT NULL,
         amt VARCHAR(100) NOT NULL,
         date VARCHAR(50) NOT NULL,
@@ -196,9 +206,9 @@ async function initDatabase() {
 
       // Seed Orders
       const ordersQuery = `
-        INSERT INTO new_orders (id, item_name, qty, amt, date, party_name, order_no, remarks_timestamp) VALUES
-        ('O-1', 'Mak Charger 20W', 50, 'Applicable', '2026-07-23', 'A1 Electronics', 'ORD-2026-001', 'Immediate dispatch'),
-        ('O-2', 'Lightning Cable 1.5m', 100, 'Not Applicable', '2026-07-22', 'Supreme Traders', 'ORD-2026-002', 'Deliver before 5 PM');
+        INSERT INTO new_orders (id, item_id, qty, amt, date, party_name, order_no, remarks_timestamp) VALUES
+        ('O-1', 1, 50, 'Applicable', '2026-07-23', 'A1 Electronics', 'ORD-2026-001', 'Immediate dispatch'),
+        ('O-2', 2, 100, 'Not Applicable', '2026-07-22', 'Supreme Traders', 'ORD-2026-002', 'Deliver before 5 PM');
       `;
       await client.query(ordersQuery);
       
@@ -249,16 +259,18 @@ app.get('/api/db', async (req, res) => {
     const itemsRes = await pool.query('SELECT * FROM items ORDER BY name ASC');
     const ordersRes = await pool.query(`
       SELECT 
-        id, 
-        item_name AS "itemName", 
-        qty, 
-        amt, 
-        date, 
-        party_name AS "partyName", 
-        order_no AS "orderNo", 
-        remarks_timestamp AS "remarksTimestamp" 
-      FROM new_orders 
-      ORDER BY date DESC, id DESC
+        o.id, 
+        o.item_id AS "itemId",
+        i.name AS "itemName", 
+        o.qty, 
+        o.amt, 
+        o.date, 
+        o.party_name AS "partyName", 
+        o.order_no AS "orderNo", 
+        o.remarks_timestamp AS "remarksTimestamp" 
+      FROM new_orders o
+      JOIN items i ON o.item_id = i.id
+      ORDER BY o.date DESC, o.id DESC
     `);
 
     res.json({
@@ -596,16 +608,18 @@ app.get('/api/orders', async (req, res) => {
   try {
     const orders = await pool.query(`
       SELECT 
-        id, 
-        item_name AS "itemName", 
-        qty, 
-        amt, 
-        date, 
-        party_name AS "partyName", 
-        order_no AS "orderNo", 
-        remarks_timestamp AS "remarksTimestamp" 
-      FROM new_orders 
-      ORDER BY date DESC, id DESC
+        o.id, 
+        o.item_id AS "itemId",
+        i.name AS "itemName", 
+        o.qty, 
+        o.amt, 
+        o.date, 
+        o.party_name AS "partyName", 
+        o.order_no AS "orderNo", 
+        o.remarks_timestamp AS "remarksTimestamp" 
+      FROM new_orders o
+      JOIN items i ON o.item_id = i.id
+      ORDER BY o.date DESC, o.id DESC
     `);
     res.json(orders.rows);
   } catch (err) {
@@ -627,6 +641,63 @@ app.post('/api/orders', async (req, res) => {
       return res.status(201).json({ message: 'No orders to save' });
     }
 
+    // 1. Get all existing items to build name-to-id mapping
+    const allItemsRes = await client.query('SELECT id, name FROM items');
+    const itemMap = new Map();
+    allItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
+
+    // 2. Identify missing items in the uploaded orders
+    const missingNames = new Set();
+    for (const order of ordersToInsert) {
+      if (order.itemName) {
+        const nameClean = order.itemName.toLowerCase().trim();
+        if (!itemMap.has(nameClean)) {
+          missingNames.add(order.itemName.trim());
+        }
+      }
+    }
+
+    // 3. Bulk insert missing items if any
+    if (missingNames.size > 0) {
+      const missingArray = Array.from(missingNames);
+      const valPlaceholders = [];
+      const valParams = [];
+      let iCounter = 1;
+      for (const name of missingArray) {
+        valPlaceholders.push(`($${iCounter}, 'Others')`);
+        valParams.push(name);
+        iCounter++;
+      }
+      
+      const insertItemsQuery = `
+        INSERT INTO items (name, category) 
+        VALUES ${valPlaceholders.join(', ')} 
+        ON CONFLICT (name) DO NOTHING 
+        RETURNING id, name
+      `;
+      const insertItemsRes = await client.query(insertItemsQuery, valParams);
+      
+      // Update our map with the newly inserted items
+      insertItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
+      
+      // Bulk insert history logs for these new items
+      if (insertItemsRes.rows.length > 0) {
+        const hPlaceholders = [];
+        const hParams = [];
+        let hCounter = 1;
+        for (const r of insertItemsRes.rows) {
+          hPlaceholders.push(`($${hCounter}, 'create', 'Item created via orders import')`);
+          hParams.push(r.id);
+          hCounter += 1;
+        }
+        await client.query(
+          `INSERT INTO item_history (item_id, action, details) VALUES ${hPlaceholders.join(', ')}`,
+          hParams
+        );
+      }
+    }
+
+    // 4. Construct values and placeholders for bulk inserting orders
     const valueParams = [];
     const valuePlaceholders = [];
     let counter = 1;
@@ -635,10 +706,18 @@ app.post('/api/orders', async (req, res) => {
       const { id, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
       const finalId = id || ('O-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + counter);
       
+      const nameClean = itemName ? itemName.toLowerCase().trim() : '';
+      const itemId = itemMap.get(nameClean);
+      
+      if (!itemId) {
+        // Skipping orders with empty item names that didn't resolve to any ID
+        continue;
+      }
+      
       valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6}, $${counter+7})`);
       valueParams.push(
         finalId, 
-        itemName ? itemName.trim() : '', 
+        itemId, 
         parseInt(qty, 10) || 0, 
         amt ? amt.trim() : '', 
         date ? date.trim() : '', 
@@ -651,10 +730,10 @@ app.post('/api/orders', async (req, res) => {
     
     if (valueParams.length > 0) {
       const insertQuery = `
-        INSERT INTO new_orders (id, item_name, qty, amt, date, party_name, order_no, remarks_timestamp) 
+        INSERT INTO new_orders (id, item_id, qty, amt, date, party_name, order_no, remarks_timestamp) 
         VALUES ${valuePlaceholders.join(', ')} 
         ON CONFLICT (id) DO UPDATE SET 
-          item_name = EXCLUDED.item_name, 
+          item_id = EXCLUDED.item_id, 
           qty = EXCLUDED.qty, 
           amt = EXCLUDED.amt, 
           date = EXCLUDED.date, 
