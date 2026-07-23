@@ -48,6 +48,7 @@
 
     let currentUser = JSON.parse(sessionStorage.getItem("mp_active_user")) || null;
     let activePage = null;
+    let ordersCurrentPage = 1;
 
     // Fetch database state from server
     async function syncDatabase() {
@@ -1745,12 +1746,12 @@
                             <input type="text" id="orders-search-input" class="form-control" placeholder="Search Party or Order NO..." style="padding: 6px 12px; font-size: 13px;">
                         </div>
                     </div>
-                    <div class="panel-body">
-                        <div class="table-responsive">
-                            <table class="data-table">
+                    <div class="panel-body" style="padding: 0;">
+                        <div class="table-responsive" style="max-height: 550px; overflow-y: auto;">
+                            <table class="data-table" style="margin: 0; border: none;">
                                 <thead>
                                     <tr>
-                                        <th>ID</th>
+                                        <th style="padding: 12px 16px;">ID</th>
                                         <th>Order NO</th>
                                         <th>Item Name</th>
                                         <th>Qty</th>
@@ -1758,7 +1759,7 @@
                                         <th>Date</th>
                                         <th>Party Name</th>
                                         <th>Remarks</th>
-                                        <th style="text-align: right;">Action</th>
+                                        <th style="text-align: right; padding: 12px 16px;">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="orders-table-body">
@@ -1766,6 +1767,7 @@
                                 </tbody>
                             </table>
                         </div>
+                        <div id="orders-pagination-container" style="display:flex; justify-content:space-between; align-items:center; padding: 12px 16px; border-top: 1px solid var(--border-color);"></div>
                     </div>
                 </div>
             </div>
@@ -1878,6 +1880,7 @@
         const searchInput = document.getElementById("orders-search-input");
         if (searchInput) {
             searchInput.addEventListener("input", () => {
+                ordersCurrentPage = 1;
                 renderOrdersTableRows(searchInput.value.trim().toLowerCase());
             });
         }
@@ -1914,6 +1917,7 @@
 
     function renderOrdersTableRows(filterQuery = "") {
         const tbody = document.getElementById("orders-table-body");
+        const pagContainer = document.getElementById("orders-pagination-container");
         if (!tbody) return;
         tbody.innerHTML = "";
 
@@ -1929,13 +1933,58 @@
 
         if (filteredOrders.length === 0) {
             tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No orders found. Import your first Excel sheet.</td></tr>`;
+            if (pagContainer) pagContainer.innerHTML = "";
             return;
         }
 
-        filteredOrders.forEach(ord => {
+        // Pagination Calculations
+        const ordersPerPage = 50;
+        const totalPages = Math.ceil(filteredOrders.length / ordersPerPage);
+        
+        // Ensure ordersCurrentPage is within valid bounds
+        if (ordersCurrentPage > totalPages) ordersCurrentPage = totalPages;
+        if (ordersCurrentPage < 1) ordersCurrentPage = 1;
+
+        const startIndex = (ordersCurrentPage - 1) * ordersPerPage;
+        const endIndex = startIndex + ordersPerPage;
+        const pageOrders = filteredOrders.slice(startIndex, endIndex);
+
+        // Render Pagination UI
+        if (pagContainer) {
+            if (filteredOrders.length <= ordersPerPage) {
+                pagContainer.innerHTML = `<span style="font-size:13px; color:var(--color-dark-muted);">Showing all ${filteredOrders.length} orders</span>`;
+            } else {
+                pagContainer.innerHTML = `
+                    <span style="font-size:13px; color:var(--color-dark-muted);">
+                        Showing ${startIndex + 1} to ${Math.min(endIndex, filteredOrders.length)} of ${filteredOrders.length} orders
+                    </span>
+                    <div style="display:flex; gap: 8px;">
+                        <button id="orders-prev-page-btn" class="btn btn-outline btn-sm" style="padding: 4px 10px;" ${ordersCurrentPage === 1 ? 'disabled' : ''}>Previous</button>
+                        <span style="font-size:13px; font-weight:600; align-self:center; margin: 0 4px;">Page ${ordersCurrentPage} of ${totalPages}</span>
+                        <button id="orders-next-page-btn" class="btn btn-outline btn-sm" style="padding: 4px 10px;" ${ordersCurrentPage === totalPages ? 'disabled' : ''}>Next</button>
+                    </div>
+                `;
+                
+                document.getElementById("orders-prev-page-btn").addEventListener("click", () => {
+                    if (ordersCurrentPage > 1) {
+                        ordersCurrentPage--;
+                        renderOrdersTableRows(filterQuery);
+                    }
+                });
+                
+                document.getElementById("orders-next-page-btn").addEventListener("click", () => {
+                    if (ordersCurrentPage < totalPages) {
+                        ordersCurrentPage++;
+                        renderOrdersTableRows(filterQuery);
+                    }
+                });
+            }
+        }
+
+        pageOrders.forEach(ord => {
             const tr = document.createElement("tr");
             tr.innerHTML = `
-                <td style="font-family: monospace; font-size:11px; color: var(--color-dark-muted);">${ord.id}</td>
+                <td style="font-family: monospace; font-size:11px; color: var(--color-dark-muted); padding: 12px 16px;">${ord.id}</td>
                 <td style="font-weight:700; color: var(--color-dark);">${ord.orderNo}</td>
                 <td style="font-weight:600; color: var(--color-primary);">${ord.itemName}</td>
                 <td><span style="font-weight:700; color:var(--color-dark);">${ord.qty}</span></td>
@@ -1943,7 +1992,7 @@
                 <td style="white-space:nowrap;">${ord.date}</td>
                 <td style="font-weight:600; color: var(--color-dark-light);">${ord.partyName}</td>
                 <td style="max-width:220px; vertical-align:top; padding:10px 16px;">${formatRemarksTimestamp(ord.remarksTimestamp)}</td>
-                <td style="text-align: right;">
+                <td style="text-align: right; padding: 12px 16px;">
                     <button class="btn btn-icon delete-order-btn" data-id="${ord.id}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);">
                         <i data-lucide="trash-2" style="width:16px; height:16px;"></i>
                     </button>
