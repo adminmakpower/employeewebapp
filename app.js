@@ -49,6 +49,7 @@
     let currentUser = JSON.parse(sessionStorage.getItem("mp_active_user")) || null;
     let activePage = null;
     let ordersCurrentPage = 1;
+    let selectedOrderIds = new Set();
 
     // Fetch database state from server
     async function syncDatabase() {
@@ -1706,7 +1707,100 @@
             }
         });
     }
-
+    function openEditOrderModal(ord) {
+        const overlay = document.createElement("div");
+        overlay.className = "modal-overlay";
+        
+        overlay.innerHTML = `
+            <div class="modal-card" style="max-width: 500px; max-height: 90vh; overflow-y: auto;">
+                <div class="modal-header">
+                    <h3>Edit Order Details</h3>
+                    <button class="modal-close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="edit-order-modal-form">
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label style="font-weight:700; font-size:12px; margin-bottom:4px; display:block;">Order NO</label>
+                            <input type="text" id="edit-ord-orderno" class="form-control" required value="${ord.orderNo || ''}">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label style="font-weight:700; font-size:12px; margin-bottom:4px; display:block;">Item ID</label>
+                            <input type="text" id="edit-ord-itemidcode" class="form-control" value="${ord.itemIdCode || ''}">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label style="font-weight:700; font-size:12px; margin-bottom:4px; display:block;">Item Name</label>
+                            <input type="text" id="edit-ord-itemname" class="form-control" required value="${ord.itemName || ''}">
+                        </div>
+                        <div style="display:flex; gap:12px; margin-bottom:12px;">
+                            <div class="form-group" style="flex:1;">
+                                <label style="font-weight:700; font-size:12px; margin-bottom:4px; display:block;">Qty</label>
+                                <input type="number" id="edit-ord-qty" class="form-control" required value="${ord.qty || 0}">
+                            </div>
+                            <div class="form-group" style="flex:1;">
+                                <label style="font-weight:700; font-size:12px; margin-bottom:4px; display:block;">AMT (Scheme)</label>
+                                <input type="text" id="edit-ord-amt" class="form-control" required value="${ord.amt || ''}">
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label style="font-weight:700; font-size:12px; margin-bottom:4px; display:block;">Date</label>
+                            <input type="date" id="edit-ord-date" class="form-control" required value="${ord.date || ''}">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label style="font-weight:700; font-size:12px; margin-bottom:4px; display:block;">Party Name</label>
+                            <input type="text" id="edit-ord-partyname" class="form-control" required value="${ord.partyName || ''}">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label style="font-weight:700; font-size:12px; margin-bottom:4px; display:block;">Remarks & Timestamp</label>
+                            <textarea id="edit-ord-remarks" class="form-control" rows="2" style="font-size:12px; height:auto;">${ord.remarksTimestamp || ''}</textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">
+                            Save Changes
+                        </button>
+                    </form>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        const closeBtn = overlay.querySelector(".modal-close-btn");
+        closeBtn.addEventListener("click", () => overlay.remove());
+        overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) overlay.remove();
+        });
+        
+        const form = overlay.querySelector("#edit-order-modal-form");
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            
+            const updatedData = {
+                orderNo: overlay.querySelector("#edit-ord-orderno").value.trim(),
+                itemIdCode: overlay.querySelector("#edit-ord-itemidcode").value.trim(),
+                itemName: overlay.querySelector("#edit-ord-itemname").value.trim(),
+                qty: parseInt(overlay.querySelector("#edit-ord-qty").value, 10) || 0,
+                amt: overlay.querySelector("#edit-ord-amt").value.trim(),
+                date: overlay.querySelector("#edit-ord-date").value.trim(),
+                partyName: overlay.querySelector("#edit-ord-partyname").value.trim(),
+                remarksTimestamp: overlay.querySelector("#edit-ord-remarks").value.trim()
+            };
+            
+            try {
+                const res = await fetch(`/api/orders/${ord.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedData)
+                });
+                if (!res.ok) throw new Error("Failed to update order on server");
+                
+                await syncDatabase();
+                showToast("Order updated successfully!", "success");
+                overlay.remove();
+                renderOrdersTableRows();
+            } catch (err) {
+                showToast("Update error: " + err.message, "error");
+            }
+        });
+    }
     // ==========================================
     // 8. ORDERS MANAGEMENT PAGE & LOGIC
     // ==========================================
@@ -1765,10 +1859,31 @@
 
                 <!-- Orders List Card -->
                 <div class="panel-card col-8">
-                    <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
-                        <h2>Orders Directory</h2>
-                        <div class="search-box-container" style="width: 250px;">
-                            <input type="text" id="orders-search-input" class="form-control" placeholder="Search Party or Order NO..." style="padding: 6px 12px; font-size: 13px;">
+                    <div class="panel-header" style="display:flex; flex-direction:column; gap:12px; align-items:stretch;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h2>Orders Directory</h2>
+                            <div style="display:flex; gap:8px;">
+                                <button id="delete-selected-orders-btn" class="btn btn-outline" style="padding: 6px 12px; font-size: 12px; color: var(--color-danger); border-color: var(--color-danger); display:none; align-items:center; gap:6px;">
+                                    <i data-lucide="trash-2" style="width:14px; height:14px;"></i> Delete Selected (<span id="selected-orders-count">0</span>)
+                                </button>
+                                <button id="clear-all-orders-btn" class="btn btn-outline" style="padding: 6px 12px; font-size: 12px; color: var(--color-danger); border-color: var(--color-danger); display:inline-flex; align-items:center; gap:6px;">
+                                    <i data-lucide="trash" style="width:14px; height:14px;"></i> Delete All Orders
+                                </button>
+                            </div>
+                        </div>
+                        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; background: var(--bg-body); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <div style="flex:1; min-width: 200px;">
+                                <input type="text" id="orders-search-input" class="form-control" placeholder="Search Party, Item or Order NO..." style="padding: 6px 12px; font-size: 13px;">
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size: 12px; font-weight:700; color: var(--color-dark-light);">From:</span>
+                                <input type="date" id="orders-filter-start-date" class="form-control" style="padding: 4px 8px; font-size: 12px; width:130px;">
+                                <span style="font-size: 12px; font-weight:700; color: var(--color-dark-light);">To:</span>
+                                <input type="date" id="orders-filter-end-date" class="form-control" style="padding: 4px 8px; font-size: 12px; width:130px;">
+                                <button id="orders-clear-date-filters" class="btn btn-icon" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-dark-muted);" title="Clear date filters">
+                                    <i data-lucide="x-circle" style="width:16px; height:16px;"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="panel-body" style="padding: 0;">
@@ -1776,7 +1891,10 @@
                             <table class="data-table" style="margin: 0; border: none;">
                                 <thead>
                                     <tr>
-                                        <th style="padding: 12px 16px;">ID</th>
+                                        <th style="width: 40px; padding: 12px 16px; text-align:center;">
+                                            <input type="checkbox" id="orders-select-all-checkbox" style="cursor:pointer;">
+                                        </th>
+                                        <th style="padding: 12px 8px;">ID</th>
                                         <th>Order NO</th>
                                         <th>Item ID</th>
                                         <th>Item Name</th>
@@ -1974,6 +2092,82 @@
                 }
             });
         }
+
+        // Date filters
+        const startDateInput = document.getElementById("orders-filter-start-date");
+        const endDateInput = document.getElementById("orders-filter-end-date");
+        const clearDateFiltersBtn = document.getElementById("orders-clear-date-filters");
+
+        const handleFilterChange = () => {
+            ordersCurrentPage = 1;
+            renderOrdersTableRows(searchInput ? searchInput.value.trim().toLowerCase() : "");
+        };
+
+        if (startDateInput) startDateInput.addEventListener("change", handleFilterChange);
+        if (endDateInput) endDateInput.addEventListener("change", handleFilterChange);
+
+        if (clearDateFiltersBtn) {
+            clearDateFiltersBtn.addEventListener("click", () => {
+                if (startDateInput) startDateInput.value = "";
+                if (endDateInput) endDateInput.value = "";
+                handleFilterChange();
+            });
+        }
+
+        // Delete all orders handler
+        const clearAllBtn = document.getElementById("clear-all-orders-btn");
+        if (clearAllBtn) {
+            clearAllBtn.addEventListener("click", async () => {
+                if (confirm("Are you absolutely sure you want to delete ALL orders? This action cannot be undone.")) {
+                    clearAllBtn.disabled = true;
+                    try {
+                        const res = await fetch('/api/orders/clear', { method: 'POST' });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error || "Failed to delete all orders");
+                        
+                        selectedOrderIds.clear();
+                        await syncDatabase();
+                        showToast("All orders deleted successfully!", "success");
+                        await addLog(`User (${currentUser.name}) deleted all orders.`, "warning");
+                        renderOrdersTableRows();
+                    } catch (err) {
+                        showToast("Delete all error: " + err.message, "error");
+                    } finally {
+                        clearAllBtn.disabled = false;
+                    }
+                }
+            });
+        }
+
+        // Delete selected orders handler
+        const deleteSelectedBtn = document.getElementById("delete-selected-orders-btn");
+        if (deleteSelectedBtn) {
+            deleteSelectedBtn.addEventListener("click", async () => {
+                const count = selectedOrderIds.size;
+                if (confirm(`Are you sure you want to delete the ${count} selected orders?`)) {
+                    deleteSelectedBtn.disabled = true;
+                    try {
+                        const res = await fetch('/api/orders/delete-multiple', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ids: Array.from(selectedOrderIds) })
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error || "Failed to delete selected orders");
+                        
+                        selectedOrderIds.clear();
+                        await syncDatabase();
+                        showToast(`Successfully deleted ${count} orders!`, "success");
+                        await addLog(`User (${currentUser.name}) deleted ${count} orders.`, "info");
+                        renderOrdersTableRows();
+                    } catch (err) {
+                        showToast("Delete selected error: " + err.message, "error");
+                    } finally {
+                        deleteSelectedBtn.disabled = false;
+                    }
+                }
+            });
+        }
     }
 
     function formatExcelDate(val) {
@@ -2027,6 +2221,11 @@
         if (!tbody) return;
         tbody.innerHTML = "";
 
+        const startDateInput = document.getElementById("orders-filter-start-date");
+        const endDateInput = document.getElementById("orders-filter-end-date");
+        const startDateVal = startDateInput ? startDateInput.value : "";
+        const endDateVal = endDateInput ? endDateInput.value : "";
+
         let filteredOrders = db.orders || [];
         if (filterQuery) {
             filteredOrders = (db.orders || []).filter(ord => {
@@ -2041,8 +2240,18 @@
             });
         }
 
+        if (startDateVal || endDateVal) {
+            filteredOrders = filteredOrders.filter(ord => {
+                const ordDate = String(ord.date || '').trim();
+                if (!ordDate) return false;
+                if (startDateVal && ordDate < startDateVal) return false;
+                if (endDateVal && ordDate > endDateVal) return false;
+                return true;
+            });
+        }
+
         if (filteredOrders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No orders found. Import your first Excel sheet.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No orders found. Import your first Excel sheet.</td></tr>`;
             if (pagContainer) pagContainer.innerHTML = "";
             return;
         }
@@ -2104,9 +2313,13 @@
             const partyNameStr = String(ord.partyName || '');
             
             const badgeClass = amtStr.toLowerCase().includes('not') ? 'badge-suspended' : 'badge-success';
+            const isChecked = selectedOrderIds.has(ord.id);
 
             tr.innerHTML = `
-                <td style="font-family: monospace; font-size:11px; color: var(--color-dark-muted); padding: 12px 16px;">${idStr}</td>
+                <td style="text-align:center; padding: 12px 16px;">
+                    <input type="checkbox" class="order-row-checkbox" data-id="${ord.id}" ${isChecked ? 'checked' : ''} style="cursor:pointer;">
+                </td>
+                <td style="font-family: monospace; font-size:11px; color: var(--color-dark-muted); padding: 12px 8px;">${idStr}</td>
                 <td style="font-weight:700; color: var(--color-dark);">${orderNoStr}</td>
                 <td style="font-family: monospace; font-size:11px; font-weight:600; color: var(--color-primary);">${itemIdCodeStr}</td>
                 <td style="font-weight:600; color: var(--color-dark-light);">${itemNameStr}</td>
@@ -2115,8 +2328,11 @@
                 <td style="white-space:nowrap;">${dateStr}</td>
                 <td style="font-weight:600; color: var(--color-dark-light);">${partyNameStr}</td>
                 <td style="max-width:220px; vertical-align:top; padding:10px 16px;">${formatRemarksTimestamp(ord.remarksTimestamp)}</td>
-                <td style="text-align: right; padding: 12px 16px;">
-                    <button class="btn btn-icon delete-order-btn" data-id="${idStr}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);">
+                <td style="text-align: right; padding: 12px 16px; white-space:nowrap;">
+                    <button class="btn btn-icon edit-order-btn" data-id="${idStr}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-primary); margin-right:4px;" title="Edit order">
+                        <i data-lucide="edit-3" style="width:16px; height:16px;"></i>
+                    </button>
+                    <button class="btn btn-icon delete-order-btn" data-id="${idStr}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);" title="Delete order">
                         <i data-lucide="trash-2" style="width:16px; height:16px;"></i>
                     </button>
                 </td>
@@ -2124,9 +2340,77 @@
             tbody.appendChild(tr);
         });
 
+        // Selection state buttons and checkbox updates
+        const selectAllCheckbox = document.getElementById("orders-select-all-checkbox");
+        const deleteSelectedBtn = document.getElementById("delete-selected-orders-btn");
+        const selectedCountSpan = document.getElementById("selected-orders-count");
+
+        const updateBulkDeleteBtnState = () => {
+            if (deleteSelectedBtn) {
+                if (selectedOrderIds.size > 0) {
+                    deleteSelectedBtn.style.display = "inline-flex";
+                    if (selectedCountSpan) selectedCountSpan.textContent = selectedOrderIds.size;
+                } else {
+                    deleteSelectedBtn.style.display = "none";
+                }
+            }
+        };
+
+        // Determine if all displayed orders are selected
+        if (selectAllCheckbox) {
+            const pageOrderIds = pageOrders.map(o => o.id);
+            const allPageChecked = pageOrderIds.length > 0 && pageOrderIds.every(id => selectedOrderIds.has(id));
+            selectAllCheckbox.checked = allPageChecked;
+        }
+
+        // Selection listeners
+        if (selectAllCheckbox) {
+            selectAllCheckbox.addEventListener("change", (e) => {
+                const checked = e.target.checked;
+                pageOrders.forEach(ord => {
+                    if (checked) {
+                        selectedOrderIds.add(ord.id);
+                    } else {
+                        selectedOrderIds.delete(ord.id);
+                    }
+                });
+                renderOrdersTableRows(filterQuery);
+            });
+        }
+
+        tbody.querySelectorAll(".order-row-checkbox").forEach(chk => {
+            chk.addEventListener("change", (e) => {
+                const id = parseInt(e.target.dataset.id, 10);
+                if (chk.checked) {
+                    selectedOrderIds.add(id);
+                } else {
+                    selectedOrderIds.delete(id);
+                }
+                updateBulkDeleteBtnState();
+                
+                // Update select-all header status
+                const pageOrderIds = pageOrders.map(o => o.id);
+                const allPageChecked = pageOrderIds.length > 0 && pageOrderIds.every(pid => selectedOrderIds.has(pid));
+                if (selectAllCheckbox) selectAllCheckbox.checked = allPageChecked;
+            });
+        });
+
+        updateBulkDeleteBtnState();
+
+        // Edit handlers
+        tbody.querySelectorAll(".edit-order-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const id = parseInt(e.currentTarget.dataset.id, 10);
+                const ord = db.orders.find(o => o.id === id);
+                if (ord) {
+                    openEditOrderModal(ord);
+                }
+            });
+        });
+
         tbody.querySelectorAll(".delete-order-btn").forEach(btn => {
             btn.addEventListener("click", async (e) => {
-                const id = e.currentTarget.dataset.id;
+                const id = parseInt(e.currentTarget.dataset.id, 10);
                 const ord = db.orders.find(o => o.id === id);
                 if (!ord) return;
 
@@ -2134,10 +2418,12 @@
                     try {
                         const res = await fetch(`/api/orders/${id}`, { method: 'DELETE' });
                         if (!res.ok) throw new Error("Failed to delete order on server");
+                        
+                        selectedOrderIds.delete(id);
                         await syncDatabase();
-                        showToast(`Deleted order "${ord.orderNo}".`, "info");
-                        await addLog(`User (${currentUser.name}) deleted order "${ord.orderNo}" (${id}).`, "warning");
-                        renderOrdersTableRows(document.getElementById("orders-search-input").value.trim().toLowerCase());
+                        showToast(`Successfully deleted order "${ord.orderNo}"!`, "success");
+                        await addLog(`User (${currentUser.name}) deleted order "${ord.orderNo}".`, "info");
+                        renderOrdersTableRows(document.getElementById("orders-search-input") ? document.getElementById("orders-search-input").value.trim().toLowerCase() : "");
                     } catch (err) {
                         showToast("Delete error: " + err.message, "error");
                     }

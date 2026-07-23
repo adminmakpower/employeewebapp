@@ -988,6 +988,83 @@ app.delete('/api/orders/:id', async (req, res) => {
   }
 });
 
+// Delete all orders
+app.post('/api/orders/clear', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM new_orders');
+    writeToLogFile('info', 'All orders deleted from database.');
+    res.json({ success: true, message: 'All orders deleted successfully.' });
+  } catch (err) {
+    writeToLogFile('error', `Failed to delete all orders: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete selected orders
+app.post('/api/orders/delete-multiple', async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'No IDs provided' });
+  }
+  try {
+    await pool.query('DELETE FROM new_orders WHERE id = ANY($1::int[])', [ids.map(Number)]);
+    writeToLogFile('info', `Deleted ${ids.length} selected orders.`);
+    res.json({ success: true, message: `Successfully deleted ${ids.length} orders.` });
+  } catch (err) {
+    writeToLogFile('error', `Failed to delete selected orders: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update an order
+app.put('/api/orders/:id', async (req, res) => {
+  const { id } = req.params;
+  const { orderNo, itemIdCode, qty, amt, date, partyName, remarksTimestamp, itemName } = req.body;
+  try {
+    let itemId = null;
+    if (itemName) {
+      const nameClean = itemName.toLowerCase().trim();
+      let itemRes = await pool.query('SELECT id FROM items WHERE LOWER(name) = $1', [nameClean]);
+      if (itemRes.rows.length > 0) {
+        itemId = itemRes.rows[0].id;
+      } else {
+        const insertRes = await pool.query("INSERT INTO items (name, category) VALUES ($1, 'Others') RETURNING id", [itemName.trim()]);
+        itemId = insertRes.rows[0].id;
+        await pool.query("INSERT INTO item_history (item_id, action, details) VALUES ($1, 'create', 'Item created during order edit')", [itemId]);
+      }
+    }
+    
+    await pool.query(`
+      UPDATE new_orders SET
+        item_id = COALESCE($1, item_id),
+        item_id_code = $2,
+        qty = $3,
+        amt = $4,
+        date = $5,
+        party_name = $6,
+        order_no = $7,
+        remarks_timestamp = $8
+      WHERE id = $9
+    `, [
+      itemId,
+      itemIdCode ? itemIdCode.trim() : '',
+      parseInt(qty, 10) || 0,
+      amt ? amt.trim() : '',
+      date ? date.trim() : '',
+      partyName ? partyName.trim() : '',
+      orderNo ? orderNo.trim() : '',
+      remarksTimestamp ? remarksTimestamp.trim() : '',
+      id
+    ]);
+    
+    writeToLogFile('info', `Order ID ${id} updated successfully.`);
+    res.json({ success: true, message: 'Order updated successfully' });
+  } catch (err) {
+    writeToLogFile('error', `Failed to update order ${id}: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==========================================
 // STATIC FILES & FRONTEND ROUTING
 // ==========================================
