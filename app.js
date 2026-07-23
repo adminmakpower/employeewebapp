@@ -1799,7 +1799,7 @@
                     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
                     const json = XLSX.utils.sheet_to_json(firstSheet);
                     
-                    parsedOrders = json.map(row => {
+                    parsedOrders = json.map((row, index) => {
                         const findKey = (candidates) => {
                             return Object.keys(row).find(k => 
                                 candidates.includes(k.toLowerCase().replace(/[\s_&]/g, ''))
@@ -1816,7 +1816,7 @@
                         const idKey = findKey(['id', 'orderid']);
 
                         return {
-                            id: (row[idKey] || row['Id'] || '').toString().trim() || ('O-' + Date.now() + Math.random().toString(36).substr(2, 4)),
+                            id: (row[idKey] || row['Id'] || '').toString().trim() || ('O-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + index),
                             itemName: (row[itemKey] || row['Item Name'] || '').toString().trim(),
                             qty: parseInt(row[qtyKey] || row['Qty'] || 0, 10),
                             amt: (row[amtKey] || row['AMT'] || '').toString().trim(),

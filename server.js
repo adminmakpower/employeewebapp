@@ -742,6 +742,9 @@ app.post('/api/orders', async (req, res) => {
       const valuePlaceholders = [];
       let counter = 1;
       
+      // Deduplicate within the batch itself to prevent PostgreSQL "cannot affect row a second time" error
+      const seenIds = new Set();
+      
       for (const order of batch) {
         const { id, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
         const finalId = id || ('O-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + (i + counter));
@@ -752,6 +755,11 @@ app.post('/api/orders', async (req, res) => {
         if (!itemId) {
           continue;
         }
+        
+        if (seenIds.has(finalId)) {
+          continue;
+        }
+        seenIds.add(finalId);
         
         valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6}, $${counter+7})`);
         valueParams.push(
