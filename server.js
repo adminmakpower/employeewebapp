@@ -82,12 +82,33 @@ async function initDatabase() {
       );
     `);
 
-    // 6. Items Table (with UNIQUE item name constraint)
+    // 6. Migrating items table structure if it was VARCHAR in old schema
+    const typeCheck = await client.query(`
+      SELECT data_type FROM information_schema.columns 
+      WHERE table_name = 'items' AND column_name = 'id';
+    `);
+    if (typeCheck.rows.length > 0 && typeCheck.rows[0].data_type === 'character varying') {
+      console.log("Migrating items table schema from VARCHAR to SERIAL...");
+      await client.query('DROP TABLE IF EXISTS items CASCADE;');
+    }
+
+    // 6. Items Table (with SERIAL auto-incrementing integer key)
     await client.query(`
       CREATE TABLE IF NOT EXISTS items (
-        id VARCHAR(50) PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         name VARCHAR(255) UNIQUE NOT NULL,
         category VARCHAR(100) NOT NULL
+      );
+    `);
+
+    // 6.1 Item History Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS item_history (
+        id SERIAL PRIMARY KEY,
+        item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
+        action VARCHAR(50) NOT NULL,
+        details TEXT NOT NULL,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
@@ -157,12 +178,21 @@ async function initDatabase() {
 
       // Seed Items
       const itemsQuery = `
-        INSERT INTO items (id, name, category) VALUES
-        ('I-1', 'Mak Charger 20W', 'Chargers'),
-        ('I-2', 'Lightning Cable 1.5m', 'Cables'),
-        ('I-3', 'Power Bank 20000mAh', 'Power Banks');
+        INSERT INTO items (name, category) VALUES
+        ('Mak Charger 20W', 'Chargers'),
+        ('Lightning Cable 1.5m', 'Cables'),
+        ('Power Bank 20000mAh', 'Power Banks');
       `;
       await client.query(itemsQuery);
+
+      // Seed Item History
+      const historyQuery = `
+        INSERT INTO item_history (item_id, action, details) VALUES
+        (1, 'create', 'Item created during system initialization'),
+        (2, 'create', 'Item created during system initialization'),
+        (3, 'create', 'Item created during system initialization');
+      `;
+      await client.query(historyQuery);
 
       // Seed Orders
       const ordersQuery = `
@@ -420,7 +450,7 @@ app.post('/api/items', async (req, res) => {
     const itemsToInsert = Array.isArray(body) ? body : [body];
     
     for (const item of itemsToInsert) {
-      const { id, name, category } = item;
+      const { name, category } = item;
       const existCheck = await client.query('SELECT id FROM items WHERE name = $1', [name]);
       if (existCheck.rows.length > 0) {
         if (Array.isArray(body)) {
@@ -430,9 +460,16 @@ app.post('/api/items', async (req, res) => {
           return res.status(400).json({ error: 'Item with this name already exists' });
         }
       }
+      const insertRes = await client.query(
+        'INSERT INTO items (name, category) VALUES ($1, $2) RETURNING id',
+        [name, category]
+      );
+      
+      const newItemId = insertRes.rows[0].id;
+      const importMethod = Array.isArray(body) ? 'bulk import' : 'manual addition';
       await client.query(
-        'INSERT INTO items (id, name, category) VALUES ($1, $2, $3)',
-        [id, name, category]
+        'INSERT INTO item_history (item_id, action, details) VALUES ($1, $2, $3)',
+        [newItemId, 'create', `Item created via ${importMethod}`]
       );
     }
     
@@ -444,6 +481,75 @@ app.post('/api/items', async (req, res) => {
     res.status(500).json({ error: 'Failed to save items: ' + err.message });
   } finally {
     if (client) client.release();
+  }
+});
+
+app.put('/api/items/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, category } = req.body;
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    
+    const currentRes = await client.query('SELECT * FROM items WHERE id = $1', [id]);
+    if (currentRes.rows.length === 0) {
+      if (client) await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    
+    const currentItem = currentRes.rows[0];
+    const changes = [];
+    
+    if (name && name !== currentItem.name) {
+      const nameCheck = await client.query('SELECT id FROM items WHERE name = $1 AND id <> $2', [name, id]);
+      if (nameCheck.rows.length > 0) {
+        if (client) await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Item with this name already exists' });
+      }
+      changes.push(`Name changed from '${currentItem.name}' to '${name}'`);
+    }
+    
+    if (category && category !== currentItem.category) {
+      changes.push(`Category changed from '${currentItem.category}' to '${category}'`);
+    }
+    
+    if (changes.length > 0) {
+      await client.query(
+        'UPDATE items SET name = COALESCE($1, name), category = COALESCE($2, category) WHERE id = $3',
+        [name, category, id]
+      );
+      
+      for (const change of changes) {
+        await client.query(
+          'INSERT INTO item_history (item_id, action, details) VALUES ($1, $2, $3)',
+          [id, 'update', change]
+        );
+      }
+    }
+    
+    await client.query('COMMIT');
+    res.json({ message: 'Item updated successfully', changes });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK');
+    console.error("Error updating item:", err);
+    res.status(500).json({ error: 'Failed to update item: ' + err.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+app.get('/api/items/:id/history', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const history = await pool.query(
+      'SELECT id, action, details, timestamp FROM item_history WHERE item_id = $1 ORDER BY timestamp DESC, id DESC',
+      [id]
+    );
+    res.json(history.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch item history' });
   }
 });
 

@@ -1202,6 +1202,17 @@
     // ==========================================
     // 7. ITEM MANAGEMENT PAGE & LOGIC
     // ==========================================
+    // ==========================================
+    // 7. ITEM MANAGEMENT PAGE & LOGIC
+    // ==========================================
+    function getCategoryOptionsHtml() {
+        let categories = [...new Set(db.items.map(item => item.category))].filter(Boolean);
+        if (categories.length === 0) {
+            categories = ['Chargers', 'Cables', 'Power Banks', 'Packaging', 'Raw Material', 'Others'];
+        }
+        return categories.map(cat => `<option value="${cat}">${cat}</option>`).join('\n');
+    }
+
     async function handleCreateItem(e) {
         const nameInput = document.getElementById("item-name-input");
         const categoryInput = document.getElementById("item-category-input");
@@ -1220,7 +1231,6 @@
         }
 
         const newItem = {
-            id: 'I-' + Date.now() + Math.random().toString(36).substr(2, 4),
             name: name,
             category: category
         };
@@ -1239,9 +1249,15 @@
             
             await syncDatabase();
             showToast(`Item "${name}" created successfully.`, "success");
-            await addLog(`User (${currentUser.name}) manually added item "${name}" (${newItem.id}).`, "success");
+            await addLog(`User (${currentUser.name}) manually added item "${name}".`, "success");
             
             nameInput.value = "";
+            
+            // Re-render select dropdown values and table rows
+            const selectElement = document.getElementById("item-category-input");
+            if (selectElement) {
+                selectElement.innerHTML = getCategoryOptionsHtml();
+            }
             renderItemsTableRows();
         } catch (err) {
             showToast(err.message, "error");
@@ -1269,12 +1285,7 @@
                             <div class="form-group">
                                 <label for="item-category-input">Category</label>
                                 <select id="item-category-input" class="form-control">
-                                    <option value="Chargers">Chargers</option>
-                                    <option value="Cables">Cables</option>
-                                    <option value="Power Banks">Power Banks</option>
-                                    <option value="Packaging">Packaging</option>
-                                    <option value="Raw Material">Raw Material</option>
-                                    <option value="Others">Others</option>
+                                    ${getCategoryOptionsHtml()}
                                 </select>
                             </div>
                             <button type="submit" class="btn btn-primary btn-block">
@@ -1315,7 +1326,7 @@
                                 <thead>
                                     <tr>
                                         <th>ID</th>
-                                        <th>Item Name</th>
+                                        <th>Item Name (Click for History)</th>
                                         <th>Category</th>
                                         <th style="text-align: right;">Actions</th>
                                     </tr>
@@ -1354,12 +1365,11 @@
                     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
                     const json = XLSX.utils.sheet_to_json(firstSheet);
                     
-                    parsedItems = json.map((row, index) => {
+                    parsedItems = json.map(row => {
                         const nameKey = Object.keys(row).find(k => k.toLowerCase().replace(/[\s_]/g, '') === 'itemname');
                         const categoryKey = Object.keys(row).find(k => k.toLowerCase() === 'category');
                         
                         return {
-                            id: 'I-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + index,
                             name: (row[nameKey] || row['Item Name'] || row['name'] || '').toString().trim(),
                             category: (row[categoryKey] || row['Category'] || row['category'] || 'Others').toString().trim()
                         };
@@ -1406,6 +1416,12 @@
                 
                 fileInput.value = "";
                 previewDiv.textContent = "";
+                
+                // Re-render select dropdown values and table rows
+                const selectElement = document.getElementById("item-category-input");
+                if (selectElement) {
+                    selectElement.innerHTML = getCategoryOptionsHtml();
+                }
                 renderItemsTableRows();
             } catch (err) {
                 showToast("Import error: " + err.message, "error");
@@ -1432,7 +1448,7 @@
         let filteredItems = db.items;
         if (filterQuery) {
             filteredItems = db.items.filter(item => 
-                item.id.toLowerCase().includes(filterQuery) ||
+                String(item.id).toLowerCase().includes(filterQuery) ||
                 item.name.toLowerCase().includes(filterQuery) ||
                 item.category.toLowerCase().includes(filterQuery)
             );
@@ -1447,10 +1463,17 @@
             const tr = document.createElement("tr");
             tr.innerHTML = `
                 <td style="font-weight:700; font-family: monospace; color:var(--color-primary);">${item.id}</td>
-                <td style="font-weight:600; color:var(--color-dark);">${item.name}</td>
+                <td>
+                    <a href="#" class="item-history-link" data-id="${item.id}" data-name="${item.name}" style="font-weight:600; color:var(--color-dark); text-decoration:none; border-bottom:1px dashed var(--color-primary); display:inline-block; cursor:pointer;">
+                        ${item.name}
+                    </a>
+                </td>
                 <td><span class="badge" style="background:var(--color-border); color:var(--color-dark-light);">${item.category}</span></td>
-                <td style="text-align: right;">
-                    <button class="btn btn-icon delete-item-btn" data-id="${item.id}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);">
+                <td style="text-align: right; white-space:nowrap;">
+                    <button class="btn btn-icon edit-item-btn" data-id="${item.id}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-primary); margin-right:8px; cursor:pointer;">
+                        <i data-lucide="edit-3" style="width:16px; height:16px;"></i>
+                    </button>
+                    <button class="btn btn-icon delete-item-btn" data-id="${item.id}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger); cursor:pointer;">
                         <i data-lucide="trash-2" style="width:16px; height:16px;"></i>
                     </button>
                 </td>
@@ -1458,10 +1481,31 @@
             tbody.appendChild(tr);
         });
 
+        // Click handler to view item history timeline modal
+        tbody.querySelectorAll(".item-history-link").forEach(link => {
+            link.addEventListener("click", (e) => {
+                e.preventDefault();
+                const id = e.currentTarget.dataset.id;
+                const name = e.currentTarget.dataset.name;
+                openItemHistoryModal(id, name);
+            });
+        });
+
+        // Click handler to edit item
+        tbody.querySelectorAll(".edit-item-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const id = e.currentTarget.dataset.id;
+                const item = db.items.find(i => String(i.id) === String(id));
+                if (item) {
+                    openEditItemModal(item);
+                }
+            });
+        });
+
         tbody.querySelectorAll(".delete-item-btn").forEach(btn => {
             btn.addEventListener("click", async (e) => {
                 const id = e.currentTarget.dataset.id;
-                const item = db.items.find(i => i.id === id);
+                const item = db.items.find(i => String(i.id) === String(id));
                 if (!item) return;
 
                 if (confirm(`Are you sure you want to delete "${item.name}"?`)) {
@@ -1471,6 +1515,12 @@
                         await syncDatabase();
                         showToast(`Deleted item "${item.name}".`, "info");
                         await addLog(`User (${currentUser.name}) deleted item "${item.name}" (${id}).`, "warning");
+                        
+                        // Re-render select dropdown values and table rows
+                        const selectElement = document.getElementById("item-category-input");
+                        if (selectElement) {
+                            selectElement.innerHTML = getCategoryOptionsHtml();
+                        }
                         renderItemsTableRows(document.getElementById("items-search-input").value.trim().toLowerCase());
                     } catch (err) {
                         showToast("Delete error: " + err.message, "error");
@@ -1480,6 +1530,155 @@
         });
 
         lucide.createIcons();
+    }
+
+    function openItemHistoryModal(itemId, itemName) {
+        const overlay = document.createElement("div");
+        overlay.className = "modal-overlay";
+        
+        overlay.innerHTML = `
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Item Audit History: ${itemName} (ID: ${itemId})</h3>
+                    <button class="modal-close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="history-timeline" id="history-timeline-container">
+                        <p style="text-align:center; padding:20px; color:var(--color-dark-muted);">Loading history...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        fetch(`/api/items/${itemId}/history`)
+            .then(res => {
+                if (!res.ok) throw new Error("Failed to load history");
+                return res.json();
+            })
+            .then(data => {
+                const container = document.getElementById("history-timeline-container");
+                if (data.length === 0) {
+                    container.innerHTML = `<p style="text-align:center; padding:20px; color:var(--color-dark-muted);">No history logs found for this item.</p>`;
+                    return;
+                }
+                
+                container.innerHTML = data.map(log => {
+                    const formattedDate = new Date(log.timestamp).toLocaleString();
+                    let dotColor = 'var(--color-info)';
+                    if (log.action === 'create') dotColor = 'var(--color-success)';
+                    if (log.action === 'delete') dotColor = 'var(--color-danger)';
+                    if (log.action === 'update') dotColor = 'var(--color-warning)';
+                    
+                    return `
+                        <div class="timeline-item">
+                            <div class="timeline-dot" style="background:${dotColor};"></div>
+                            <div class="timeline-meta">${formattedDate} &bull; <strong>${log.action.toUpperCase()}</strong></div>
+                            <div class="timeline-desc">${log.details}</div>
+                        </div>
+                    `;
+                }).join('');
+            })
+            .catch(err => {
+                const container = document.getElementById("history-timeline-container");
+                container.innerHTML = `<p style="text-align:center; padding:20px; color:var(--color-danger);">${err.message}</p>`;
+            });
+            
+        const closeBtn = overlay.querySelector(".modal-close-btn");
+        closeBtn.addEventListener("click", () => overlay.remove());
+        overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) overlay.remove();
+        });
+    }
+
+    function openEditItemModal(item) {
+        const overlay = document.createElement("div");
+        overlay.className = "modal-overlay";
+        
+        overlay.innerHTML = `
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Edit Item Details</h3>
+                    <button class="modal-close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="edit-item-modal-form">
+                        <div class="form-group">
+                            <label for="edit-item-name">Item Name</label>
+                            <input type="text" id="edit-item-name" class="form-control" required value="${item.name}">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-item-category">Category</label>
+                            <select id="edit-item-category" class="form-control">
+                                ${getCategoryOptionsHtml()}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">
+                            Save Changes
+                        </button>
+                    </form>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        const categorySelect = overlay.querySelector("#edit-item-category");
+        categorySelect.value = item.category;
+        
+        const closeBtn = overlay.querySelector(".modal-close-btn");
+        closeBtn.addEventListener("click", () => overlay.remove());
+        overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) overlay.remove();
+        });
+        
+        const form = overlay.querySelector("#edit-item-modal-form");
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const newName = overlay.querySelector("#edit-item-name").value.trim();
+            const newCat = categorySelect.value;
+            
+            if (!newName) {
+                showToast("Item name is required.", "error");
+                return;
+            }
+            
+            try {
+                const res = await fetch(`/api/items/${item.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName, category: newCat })
+                });
+                
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.error || "Failed to update item details");
+                }
+                
+                const resData = await res.json();
+                await syncDatabase();
+                showToast("Item updated successfully.", "success");
+                
+                if (resData.changes && resData.changes.length > 0) {
+                    await addLog(`User (${currentUser.name}) edited item ID ${item.id}: ${resData.changes.join(', ')}`, "info");
+                }
+                
+                overlay.remove();
+                
+                // Refresh directory
+                const searchVal = document.getElementById("items-search-input") ? document.getElementById("items-search-input").value.trim().toLowerCase() : "";
+                renderItemsTableRows(searchVal);
+                
+                // Re-render items page select dropdown dynamic values
+                const selectElement = document.getElementById("item-category-input");
+                if (selectElement) {
+                    selectElement.innerHTML = getCategoryOptionsHtml();
+                }
+            } catch (err) {
+                showToast(err.message, "error");
+            }
+        });
     }
 
     // ==========================================
