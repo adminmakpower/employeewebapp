@@ -2468,20 +2468,22 @@
         if (selectAllCheckbox) {
             selectAllCheckbox.addEventListener("change", (e) => {
                 const checked = e.target.checked;
-                pageOrders.forEach(ord => {
+                tbody.querySelectorAll(".order-row-checkbox").forEach(chk => {
+                    const id = parseInt(chk.dataset.id, 10);
+                    chk.checked = checked;
                     if (checked) {
-                        selectedOrderIds.add(ord.id);
+                        selectedOrderIds.add(id);
                     } else {
-                        selectedOrderIds.delete(ord.id);
+                        selectedOrderIds.delete(id);
                     }
                 });
-                renderOrdersTableRows(filterQuery);
+                updateBulkDeleteBtnState();
             });
         }
 
         tbody.querySelectorAll(".order-row-checkbox").forEach(chk => {
             chk.addEventListener("change", (e) => {
-                const id = parseInt(e.target.dataset.id, 10);
+                const id = parseInt(chk.dataset.id, 10);
                 if (chk.checked) {
                     selectedOrderIds.add(id);
                 } else {
@@ -2489,10 +2491,12 @@
                 }
                 updateBulkDeleteBtnState();
                 
-                // Update select-all header status
-                const pageOrderIds = pageOrders.map(o => o.id);
-                const allPageChecked = pageOrderIds.length > 0 && pageOrderIds.every(pid => selectedOrderIds.has(pid));
-                if (selectAllCheckbox) selectAllCheckbox.checked = allPageChecked;
+                // Update select-all header status instantly based on UI checkbox states
+                if (selectAllCheckbox) {
+                    const checkboxes = tbody.querySelectorAll(".order-row-checkbox");
+                    const allChecked = checkboxes.length > 0 && Array.from(checkboxes).every(c => c.checked);
+                    selectAllCheckbox.checked = allChecked;
+                }
             });
         });
 
