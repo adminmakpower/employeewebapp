@@ -1822,7 +1822,7 @@
                             itemName: (row[itemKey] || row['Item Name'] || '').toString().trim(),
                             qty: parseInt(row[qtyKey] || row['Qty'] || 0, 10),
                             amt: (row[amtKey] || row['AMT'] || '').toString().trim(),
-                            date: (row[dateKey] || row['Date'] || new Date().toISOString().split('T')[0]).toString().trim(),
+                            date: formatExcelDate(row[dateKey] || row['Date'] || new Date().toISOString().split('T')[0]),
                             partyName: (row[partyKey] || row['Party Name'] || '').toString().trim(),
                             orderNo: (row[orderNoKey] || row['Order NO'] || '').toString().trim(),
                             remarksTimestamp: (row[remarksKey] || row['Remarks&Timestamp'] || '').toString().trim()
@@ -1884,6 +1884,21 @@
                 renderOrdersTableRows(searchInput.value.trim().toLowerCase());
             });
         }
+    }
+
+    function formatExcelDate(val) {
+        if (val === undefined || val === null) return '';
+        const num = Number(val);
+        if (!isNaN(num) && num > 30000 && num < 60000) {
+            const date = new Date((num - 25569) * 86400 * 1000);
+            const yyyy = date.getFullYear();
+            let mm = date.getMonth() + 1;
+            let dd = date.getDate();
+            if (mm < 10) mm = '0' + mm;
+            if (dd < 10) dd = '0' + dd;
+            return `${yyyy}-${mm}-${dd}`;
+        }
+        return String(val).trim();
     }
 
     function formatRemarksTimestamp(text) {
@@ -1994,7 +2009,7 @@
             const itemNameStr = String(ord.itemName || '');
             const qtyVal = ord.qty || 0;
             const amtStr = String(ord.amt || '');
-            const dateStr = String(ord.date || '');
+            const dateStr = formatExcelDate(ord.date);
             const partyNameStr = String(ord.partyName || '');
             
             const badgeClass = amtStr.toLowerCase().includes('not') ? 'badge-suspended' : 'badge-success';
