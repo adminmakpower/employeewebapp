@@ -1342,19 +1342,18 @@
 
         container.innerHTML = `
             <div class="dashboard-grid">
-                <!-- Add / Upload Card -->
-                <div class="panel-card col-4">
+                <!-- Manual Add Card -->
+                <div class="panel-card col-6">
                     <div class="panel-header">
                         <h2>Add Inventory Item</h2>
                     </div>
                     <div class="panel-body">
-                        <!-- Manual Form -->
-                        <form id="create-item-form" style="margin-bottom: 24px;">
+                        <form id="create-item-form">
                             <div class="form-group">
                                 <label for="item-name-input">Item Name</label>
                                 <input type="text" id="item-name-input" required class="form-control" placeholder="e.g. Mak Fast Charger 20W">
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" style="margin-top: 12px; margin-bottom: 16px;">
                                 <label for="item-category-input">Category</label>
                                 <select id="item-category-input" class="form-control">
                                     ${getCategoryOptionsHtml()}
@@ -1364,28 +1363,30 @@
                                 <i data-lucide="plus-circle"></i> Add Item
                             </button>
                         </form>
+                    </div>
+                </div>
 
-                        <div style="border-top: 1px dashed var(--color-border); margin: 20px 0;"></div>
-
-                        <!-- Bulk Excel Upload -->
-                        <div>
-                            <h3 style="font-size: 14px; margin-bottom: 8px; font-weight:600;">Bulk Import via Excel</h3>
-                            <p style="font-size: 12px; color: var(--color-dark-muted); margin-bottom: 12px;">
-                                Upload an Excel file with columns: <strong>Item Name</strong> and <strong>Category</strong>. IDs will be auto-assigned.
-                            </p>
-                            <div class="form-group">
-                                <input type="file" id="item-excel-file" accept=".xlsx, .xls, .csv" class="form-control" style="padding: 4px 8px;">
-                            </div>
-                            <button id="import-items-excel-btn" class="btn btn-secondary btn-block" disabled>
-                                <i data-lucide="upload"></i> Upload & Import
-                            </button>
-                            <div id="items-excel-preview" style="margin-top: 12px; font-size:12px; font-weight:600;"></div>
+                <!-- Bulk Excel Import Card -->
+                <div class="panel-card col-6">
+                    <div class="panel-header">
+                        <h2>Bulk Import via Excel</h2>
+                    </div>
+                    <div class="panel-body">
+                        <p style="font-size: 13px; color: var(--color-dark-muted); margin-bottom: 16px;">
+                            Upload an Excel file with columns: <strong>Item Name</strong> and <strong>Category</strong>. IDs will be auto-assigned.
+                        </p>
+                        <div class="form-group">
+                            <input type="file" id="item-excel-file" accept=".xlsx, .xls, .csv" class="form-control" style="padding: 4px 8px;">
                         </div>
+                        <button id="import-items-excel-btn" class="btn btn-secondary btn-block" disabled style="margin-top: 12px;">
+                            <i data-lucide="upload"></i> Upload & Import
+                        </button>
+                        <div id="items-excel-preview" style="margin-top: 12px; font-size:12px; font-weight:600;"></div>
                     </div>
                 </div>
 
                 <!-- Directory Card -->
-                <div class="panel-card col-8">
+                <div class="panel-card col-12">
                     <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
                         <h2>Items Directory</h2>
                         <div class="search-box-container" style="width: 250px;">
@@ -1867,7 +1868,7 @@
         container.innerHTML = `
             <div class="dashboard-grid">
                 <!-- Excel Import Card -->
-                <div class="panel-card col-4">
+                <div class="panel-card col-6">
                     <div class="panel-header">
                         <h2>Upload Orders (Excel)</h2>
                     </div>
@@ -1889,7 +1890,7 @@
                 </div>
 
                 <!-- Google Sheets Auto-Sync Card -->
-                <div class="panel-card col-4" style="margin-top: 20px;">
+                <div class="panel-card col-6">
                     <div class="panel-header">
                         <h2>Google Sheet Auto-Sync</h2>
                     </div>
@@ -1914,7 +1915,7 @@
                 </div>
 
                 <!-- Orders List Card -->
-                <div class="panel-card col-8">
+                <div class="panel-card col-12">
                     <div class="panel-header" style="display:flex; flex-direction:column; gap:12px; align-items:stretch;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <h2>Orders Directory</h2>
