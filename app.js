@@ -46,9 +46,9 @@
         orders: []
     };
 
-    let currentUser = JSON.parse(sessionStorage.getItem("mp_active_user")) || null;
+    let currentUser = JSON.parse(localStorage.getItem("mp_active_user")) || null;
     let activePage = null;
-    let ordersCurrentPage = 1;
+    let ordersCurrentPage = parseInt(localStorage.getItem("orders_current_page") || "1", 10);
     let selectedOrderIds = new Set();
 
     // Fetch database state from server
@@ -206,6 +206,7 @@
     // Switch portal page views
     function showPage(pageId) {
         activePage = pageId;
+        localStorage.setItem("mp_active_page", pageId);
         
         // Hide all pages
         document.querySelectorAll(".portal-page").forEach(page => {
@@ -412,7 +413,7 @@
 
             // Successful login
             currentUser = user;
-            sessionStorage.setItem("mp_active_user", JSON.stringify(currentUser));
+            localStorage.setItem("mp_active_user", JSON.stringify(currentUser));
             
             showToast(`Sign-in approved as ${user.name}!`, "success");
             addLog(`User ${user.name} (${user.role}) successfully logged in.`, "success");
@@ -434,7 +435,12 @@
             addLog(`User ${currentUser.name} logged out.`, "info");
         }
         currentUser = null;
-        sessionStorage.removeItem("mp_active_user");
+        localStorage.removeItem("mp_active_user");
+        localStorage.removeItem("mp_active_page");
+        localStorage.removeItem("orders_filter_search");
+        localStorage.removeItem("orders_filter_start");
+        localStorage.removeItem("orders_filter_end");
+        localStorage.removeItem("orders_current_page");
         
         // Reset forms
         document.getElementById("login-form").reset();
@@ -473,11 +479,19 @@
             item.classList.remove("active");
         });
         
-        // Select first nav item as default and display it
+        // Select saved nav item or first nav item as default and display it
         const firstNavItem = activeRoleNav.querySelector(".nav-item");
-        if (firstNavItem) {
-            firstNavItem.classList.add("active");
-            showPage(firstNavItem.dataset.target);
+        const savedPage = localStorage.getItem("mp_active_page");
+        const targetPage = savedPage && activeRoleNav.querySelector(`.nav-item[data-target="${savedPage}"]`) ? savedPage : (firstNavItem ? firstNavItem.dataset.target : null);
+        
+        if (targetPage) {
+            const matchingNavItem = activeRoleNav.querySelector(`.nav-item[data-target="${targetPage}"]`);
+            if (matchingNavItem) {
+                matchingNavItem.classList.add("active");
+            } else if (firstNavItem) {
+                firstNavItem.classList.add("active");
+            }
+            showPage(targetPage);
         }
 
         showSection("view-portal");
@@ -2041,7 +2055,19 @@
             }
         });
 
+        // Recover filters from localStorage on load
         const searchInput = document.getElementById("orders-search-input");
+        const startDateInput = document.getElementById("orders-filter-start-date");
+        const endDateInput = document.getElementById("orders-filter-end-date");
+
+        const savedSearch = localStorage.getItem("orders_filter_search") || "";
+        const savedStart = localStorage.getItem("orders_filter_start") || "";
+        const savedEnd = localStorage.getItem("orders_filter_end") || "";
+
+        if (searchInput && savedSearch) searchInput.value = savedSearch;
+        if (startDateInput && savedStart) startDateInput.value = savedStart;
+        if (endDateInput && savedEnd) endDateInput.value = savedEnd;
+
         if (searchInput) {
             searchInput.addEventListener("input", () => {
                 ordersCurrentPage = 1;
@@ -2112,8 +2138,6 @@
         }
 
         // Date filters
-        const startDateInput = document.getElementById("orders-filter-start-date");
-        const endDateInput = document.getElementById("orders-filter-end-date");
         const clearDateFiltersBtn = document.getElementById("orders-clear-date-filters");
 
         const handleFilterChange = () => {
@@ -2239,10 +2263,23 @@
         if (!tbody) return;
         tbody.innerHTML = "";
 
+        const searchInput = document.getElementById("orders-search-input");
         const startDateInput = document.getElementById("orders-filter-start-date");
         const endDateInput = document.getElementById("orders-filter-end-date");
+
+        // Recover filter query from input if not supplied directly
+        if (searchInput && !filterQuery && searchInput.value) {
+            filterQuery = searchInput.value.trim().toLowerCase();
+        }
+
         const startDateVal = startDateInput ? startDateInput.value : "";
         const endDateVal = endDateInput ? endDateInput.value : "";
+
+        // Save filters to localStorage
+        localStorage.setItem("orders_filter_search", searchInput ? searchInput.value.trim() : "");
+        localStorage.setItem("orders_filter_start", startDateVal);
+        localStorage.setItem("orders_filter_end", endDateVal);
+        localStorage.setItem("orders_current_page", ordersCurrentPage.toString());
 
         let filteredOrders = db.orders || [];
         if (filterQuery) {
