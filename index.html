@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mak Power - Role-based Enterprise Portal</title>
+    <!-- Google Fonts: Outfit (Headings) and Inter (Body) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- App Notification Banner -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Main App Container -->
+    <div id="app">
+        <!-- ============================================ -->
+        <!-- 1. LOGIN SCREEN -->
+        <!-- ============================================ -->
+        <section id="view-login" class="view-section active">
+            <div class="login-container">
+                <div class="login-card">
+                    <div class="login-brand">
+                        <img src="logo.png" alt="Mak Power Logo" class="brand-logo">
+                        <p class="brand-subtitle">Enterprise Resource Portal</p>
+                    </div>
+                    
+                    <form id="login-form" class="login-form">
+                        <div class="form-group">
+                            <label for="login-email">Email Address</label>
+                            <div class="input-wrapper">
+                                <i data-lucide="mail" class="input-icon"></i>
+                                <input type="email" id="login-email" required placeholder="name@makpower.com">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="login-password">Password</label>
+                            </div>
+                            <div class="input-wrapper">
+                                <i data-lucide="lock" class="input-icon"></i>
+                                <input type="password" id="login-password" required placeholder="••••••••">
+                                <button type="button" id="toggle-password" class="password-toggle-btn">
+                                    <i data-lucide="eye" id="password-toggle-icon"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-block" id="login-submit-btn">
+                            <span class="btn-text">Sign In</span>
+                            <span class="btn-loader hidden"></span>
+                        </button>
+                    </form>
+
+                    <!-- Quick Testing Login Panel -->
+                    <div class="quick-login">
+                        <p class="quick-login-title">Quick Demo Login</p>
+                        <div class="quick-login-buttons">
+                            <button class="btn btn-outline btn-sm quick-login-btn" data-email="superadmin@makpower.com" data-pass="super123">
+                                <i data-lucide="shield-check" class="badge-icon"></i> Super Admin
+                            </button>
+                            <button class="btn btn-outline btn-sm quick-login-btn" data-email="admin@makpower.com" data-pass="admin123">
+                                <i data-lucide="user-check" class="badge-icon"></i> Admin
+                            </button>
+                            <button class="btn btn-outline btn-sm quick-login-btn" data-email="employee@makpower.com" data-pass="emp123">
+                                <i data-lucide="user" class="badge-icon"></i> Employee
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================ -->
+        <!-- 2. MAIN PORTAL VIEW (SIDEBAR + CONTENT SHELL) -->
+        <!-- ============================================ -->
+        <section id="view-portal" class="view-section">
+            <div class="portal-layout">
+                <!-- Sidebar -->
+                <aside class="sidebar">
+                    <div class="sidebar-header">
+                        <img src="logo.png" alt="Mak Power Logo" class="sidebar-logo">
+                        <span class="sidebar-badge" id="user-role-badge">Role</span>
+                    </div>
+
+                    <!-- Role-Specific Sidebar Navs -->
+                    <nav class="sidebar-nav">
+                        <!-- Super Admin Nav -->
+                        <div id="nav-superadmin" class="role-nav hidden">
+                            <a href="#" class="nav-item active" data-target="superadmin-dashboard">
+                                <i data-lucide="layout-dashboard"></i> Dashboard
+                            </a>
+                            <a href="#" class="nav-item" data-target="superadmin-users">
+                                <i data-lucide="users"></i> User Management
+                            </a>
+                            <a href="#" class="nav-item" data-target="superadmin-logs">
+                                <i data-lucide="scroll-text"></i> System Logs
+                            </a>
+                        </div>
+
+                        <!-- Admin Nav -->
+                        <div id="nav-admin" class="role-nav hidden">
+                            <a href="#" class="nav-item active" data-target="admin-dashboard">
+                                <i data-lucide="layout-dashboard"></i> Overview
+                            </a>
+                            <a href="#" class="nav-item" data-target="admin-tasks">
+                                <i data-lucide="check-square"></i> Task Board
+                            </a>
+                            <a href="#" class="nav-item" data-target="admin-announcements">
+                                <i data-lucide="megaphone"></i> Announcements
+                            </a>
+                        </div>
+
+                        <!-- Employee Nav -->
+                        <div id="nav-employee" class="role-nav hidden">
+                            <a href="#" class="nav-item active" data-target="employee-dashboard">
+                                <i data-lucide="clipboard-list"></i> My Tasks
+                            </a>
+                            <a href="#" class="nav-item" data-target="employee-reports">
+                                <i data-lucide="file-text"></i> Daily Report
+                            </a>
+                        </div>
+                    </nav>
+
+                    <!-- Sidebar Footer -->
+                    <div class="sidebar-footer">
+                        <div class="user-profile-summary">
+                            <div class="avatar" id="user-avatar">MP</div>
+                            <div class="user-info">
+                                <p class="user-fullname" id="user-display-name">Loading...</p>
+                                <p class="user-email" id="user-display-email">loading@makpower.com</p>
+                            </div>
+                        </div>
+                        <button id="logout-btn" class="btn btn-icon btn-logout" title="Sign Out">
+                            <i data-lucide="log-out"></i>
+                        </button>
+                    </div>
+                </aside>
+
+                <!-- Page Content Area -->
+                <main class="main-content">
+                    <header class="content-header">
+                        <div class="header-title-area">
+                            <h1 id="page-title">Dashboard</h1>
+                            <p id="page-subtitle">Welcome back, Super Admin</p>
+                        </div>
+                        <div class="header-actions">
+                            <div class="clock-display" id="clock">12:00 PM</div>
+                        </div>
+                    </header>
+
+                    <!-- Scrollable Container for Dashboard Pages -->
+                    <div class="content-body">
+
+                        <!-- ============================================ -->
+                        <!-- SUPER ADMIN PAGES -->
+                        <!-- ============================================ -->
+                        <div id="page-superadmin-dashboard" class="portal-page hidden">
+                            <!-- Stats Grid -->
+                            <div class="stats-grid">
+                                <div class="stat-card">
+                                    <div class="stat-icon icon-primary"><i data-lucide="shield"></i></div>
+                                    <div class="stat-details">
+                                        <h3 class="stat-value" id="stat-admins-count">0</h3>
+                                        <p class="stat-label">Total Admins</p>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-icon icon-info"><i data-lucide="users"></i></div>
+                                    <div class="stat-details">
+                                        <h3 class="stat-value" id="stat-employees-count">0</h3>
+                                        <p class="stat-label">Total Employees</p>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-icon icon-success"><i data-lucide="check-circle-2"></i></div>
+                                    <div class="stat-details">
+                                        <h3 class="stat-value" id="stat-total-tasks">0</h3>
+                                        <p class="stat-label">Active Tasks</p>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-icon icon-warning"><i data-lucide="activity"></i></div>
+                                    <div class="stat-details">
+                                        <h3 class="stat-value" id="stat-health">100%</h3>
+                                        <p class="stat-label">System Status</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Dual Panel Grid -->
+                            <div class="dashboard-grid">
+                                <!-- Quick User Control Panel -->
+                                <div class="panel-card col-8">
+                                    <div class="panel-header">
+                                        <h2>Recent Users Activity</h2>
+                                        <button class="btn btn-sm btn-primary" onclick="app.showPage('superadmin-users')">Manage Users</button>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="table-responsive">
+                                            <table class="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>User</th>
+                                                        <th>Role</th>
+                                                        <th>Status</th>
+                                                        <th>Created</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="superadmin-recent-users-table">
+                                                    <!-- Dynamically populated -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Quick Stats -->
+                                <div class="panel-card col-4">
+                                    <div class="panel-header">
+                                        <h2>Role Distribution</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="pie-chart-mock">
+                                            <div class="chart-legend">
+                                                <div class="legend-item">
+                                                    <span class="legend-color color-superadmin"></span>
+                                                    <span>Super Admins</span>
+                                                    <strong id="legend-super-count">1</strong>
+                                                </div>
+                                                <div class="legend-item">
+                                                    <span class="legend-color color-admin"></span>
+                                                    <span>Admins</span>
+                                                    <strong id="legend-admin-count">0</strong>
+                                                </div>
+                                                <div class="legend-item">
+                                                    <span class="legend-color color-employee"></span>
+                                                    <span>Employees</span>
+                                                    <strong id="legend-emp-count">0</strong>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- User Management Page -->
+                        <div id="page-superadmin-users" class="portal-page hidden">
+                            <div class="dashboard-grid">
+                                <!-- User List Table -->
+                                <div class="panel-card col-8">
+                                    <div class="panel-header">
+                                        <h2>All Staff Members</h2>
+                                        <div class="search-box">
+                                            <i data-lucide="search" class="search-icon"></i>
+                                            <input type="text" id="user-search" placeholder="Search by name or email..." class="form-control input-sm">
+                                        </div>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="table-responsive">
+                                            <table class="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Full Name</th>
+                                                        <th>Email</th>
+                                                        <th>Role</th>
+                                                        <th>Status</th>
+                                                        <th>Actions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="superadmin-users-table">
+                                                    <!-- Dynamically populated -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- User Creation Form -->
+                                <div class="panel-card col-4">
+                                    <div class="panel-header">
+                                        <h2>Add New User</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <form id="create-user-form">
+                                            <div class="form-group">
+                                                <label for="create-name">Full Name</label>
+                                                <input type="text" id="create-name" required class="form-control" placeholder="e.g. John Doe">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="create-email">Email Address</label>
+                                                <input type="email" id="create-email" required class="form-control" placeholder="user@makpower.com">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="create-role">User Role</label>
+                                                <select id="create-role" class="form-control">
+                                                    <option value="employee">Employee</option>
+                                                    <option value="admin">Admin</option>
+                                                    <option value="superadmin">Super Admin</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="create-password">Initial Password</label>
+                                                <input type="text" id="create-password" required class="form-control" placeholder="Create password">
+                                            </div>
+                                            <button type="submit" class="btn btn-primary btn-block">
+                                                <i data-lucide="user-plus"></i> Create Account
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- System Logs Page -->
+                        <div id="page-superadmin-logs" class="portal-page hidden">
+                            <div class="panel-card">
+                                <div class="panel-header">
+                                    <h2>System Logs & Audit Trail</h2>
+                                    <button id="clear-logs-btn" class="btn btn-outline btn-sm">Clear Logs</button>
+                                </div>
+                                <div class="panel-body">
+                                    <div class="logs-container" id="system-logs-list">
+                                        <!-- Dynamically populated -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ============================================ -->
+                        <!-- ADMIN PAGES -->
+                        <!-- ============================================ -->
+                        <div id="page-admin-dashboard" class="portal-page hidden">
+                            <!-- Stats Row -->
+                            <div class="stats-grid">
+                                <div class="stat-card">
+                                    <div class="stat-icon icon-primary"><i data-lucide="check-square"></i></div>
+                                    <div class="stat-details">
+                                        <h3 class="stat-value" id="admin-stat-total-tasks">0</h3>
+                                        <p class="stat-label">Assigned Tasks</p>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-icon icon-warning"><i data-lucide="loader"></i></div>
+                                    <div class="stat-details">
+                                        <h3 class="stat-value" id="admin-stat-pending-tasks">0</h3>
+                                        <p class="stat-label">In Progress</p>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-icon icon-success"><i data-lucide="check-circle-2"></i></div>
+                                    <div class="stat-details">
+                                        <h3 class="stat-value" id="admin-stat-completed-tasks">0</h3>
+                                        <p class="stat-label">Completed</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="dashboard-grid">
+                                <!-- Employee Task Tracking Table -->
+                                <div class="panel-card col-8">
+                                    <div class="panel-header">
+                                        <h2>Task Progress Tracking</h2>
+                                        <button class="btn btn-sm btn-primary" onclick="app.showPage('admin-tasks')">Assign New Task</button>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="table-responsive">
+                                            <table class="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Task</th>
+                                                        <th>Assigned To</th>
+                                                        <th>Due Date</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="admin-task-progress-table">
+                                                    <!-- Dynamically populated -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Active Announcements Panel -->
+                                <div class="panel-card col-4">
+                                    <div class="panel-header">
+                                        <h2>Recent Company Board</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="announcements-mini-list" id="admin-announcements-mini">
+                                            <!-- Dynamically populated -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Admin Task Board Page -->
+                        <div id="page-admin-tasks" class="portal-page hidden">
+                            <div class="dashboard-grid">
+                                <!-- Active Tasks List -->
+                                <div class="panel-card col-8">
+                                    <div class="panel-header">
+                                        <h2>Current Work Orders</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="table-responsive">
+                                            <table class="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Task Title</th>
+                                                        <th>Assigned Employee</th>
+                                                        <th>Due Date</th>
+                                                        <th>Status</th>
+                                                        <th>Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="admin-all-tasks-table">
+                                                    <!-- Dynamically populated -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Task Assign Form -->
+                                <div class="panel-card col-4">
+                                    <div class="panel-header">
+                                        <h2>Create Task</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <form id="assign-task-form">
+                                            <div class="form-group">
+                                                <label for="task-title">Task Title</label>
+                                                <input type="text" id="task-title" required class="form-control" placeholder="e.g. Quality Check Batch #4">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="task-desc">Description</label>
+                                                <textarea id="task-desc" required class="form-control text-area" placeholder="Describe the task instructions..."></textarea>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="task-assignee">Assign to Employee</label>
+                                                <select id="task-assignee" required class="form-control">
+                                                    <!-- Dynamically populated employees -->
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="task-due">Due Date</label>
+                                                <input type="date" id="task-due" required class="form-control">
+                                            </div>
+                                            <button type="submit" class="btn btn-primary btn-block">
+                                                <i data-lucide="plus-circle"></i> Dispatch Task
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Admin Announcements Page -->
+                        <div id="page-admin-announcements" class="portal-page hidden">
+                            <div class="dashboard-grid">
+                                <!-- Announcements Feed -->
+                                <div class="panel-card col-8">
+                                    <div class="panel-header">
+                                        <h2>Announcement History</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="announcements-list-detailed" id="admin-announcements-feed">
+                                            <!-- Dynamically populated -->
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Announcement Post Form -->
+                                <div class="panel-card col-4">
+                                    <div class="panel-header">
+                                        <h2>Publish Announcement</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <form id="post-announcement-form">
+                                            <div class="form-group">
+                                                <label for="announcement-title">Headline</label>
+                                                <input type="text" id="announcement-title" required class="form-control" placeholder="e.g. Monthly Review Meeting">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="announcement-content">Details</label>
+                                                <textarea id="announcement-content" required class="form-control text-area" placeholder="Write announcement text..."></textarea>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="announcement-priority">Priority Level</label>
+                                                <select id="announcement-priority" class="form-control">
+                                                    <option value="normal">Normal</option>
+                                                    <option value="high">High Alert</option>
+                                                </select>
+                                            </div>
+                                            <button type="submit" class="btn btn-primary btn-block">
+                                                <i data-lucide="send"></i> Post to Board
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ============================================ -->
+                        <!-- EMPLOYEE PAGES -->
+                        <!-- ============================================ -->
+                        <div id="page-employee-dashboard" class="portal-page hidden">
+                            <div class="dashboard-grid">
+                                <!-- Employee Task Panel -->
+                                <div class="panel-card col-8">
+                                    <div class="panel-header">
+                                        <h2>My Assigned Tasks</h2>
+                                        <div class="task-filter-options">
+                                            <button class="btn btn-xs btn-outline active task-filter-btn" data-filter="all">All</button>
+                                            <button class="btn btn-xs btn-outline task-filter-btn" data-filter="pending">Pending</button>
+                                            <button class="btn btn-xs btn-outline task-filter-btn" data-filter="progress">In Progress</button>
+                                            <button class="btn btn-xs btn-outline task-filter-btn" data-filter="completed">Completed</button>
+                                        </div>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="employee-task-list" id="employee-task-list">
+                                            <!-- Dynamically populated -->
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Announcements sidebar for employee -->
+                                <div class="panel-card col-4">
+                                    <div class="panel-header">
+                                        <h2>Company Announcements</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="announcements-mini-list" id="employee-announcements">
+                                            <!-- Dynamically populated -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Employee Daily Reports Page -->
+                        <div id="page-employee-reports" class="portal-page hidden">
+                            <div class="dashboard-grid">
+                                <!-- Previous Reports Table -->
+                                <div class="panel-card col-8">
+                                    <div class="panel-header">
+                                        <h2>My Daily Activity Logs</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <div class="table-responsive">
+                                            <table class="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Date</th>
+                                                        <th>Report Summary</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="employee-reports-table">
+                                                    <!-- Dynamically populated -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Submit Report Form -->
+                                <div class="panel-card col-4">
+                                    <div class="panel-header">
+                                        <h2>Submit Daily Report</h2>
+                                    </div>
+                                    <div class="panel-body">
+                                        <form id="submit-report-form">
+                                            <div class="form-group">
+                                                <label for="report-text">What did you accomplish today?</label>
+                                                <textarea id="report-text" required class="form-control text-area" placeholder="Describe tasks completed, milestones met, and challenges..."></textarea>
+                                            </div>
+                                            <button type="submit" class="btn btn-primary btn-block">
+                                                <i data-lucide="file-plus"></i> Submit Report
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </main>
+            </div>
+        </section>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

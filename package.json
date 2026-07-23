@@ -1,0 +1,14 @@
+{
+  "name": "mak-power-portal",
+  "version": "1.0.0",
+  "description": "Mak Power - Role-based Enterprise Portal",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vite --port 3000 --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
