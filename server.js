@@ -82,6 +82,29 @@ async function initDatabase() {
       );
     `);
 
+    // 6. Items Table (with UNIQUE item name constraint)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS items (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(255) UNIQUE NOT NULL,
+        category VARCHAR(100) NOT NULL
+      );
+    `);
+
+    // 7. New Orders Table (storing Excel imported orders)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS new_orders (
+        id VARCHAR(50) PRIMARY KEY,
+        item_name VARCHAR(255) NOT NULL,
+        qty INTEGER NOT NULL,
+        amt VARCHAR(100) NOT NULL,
+        date VARCHAR(50) NOT NULL,
+        party_name VARCHAR(255) NOT NULL,
+        order_no VARCHAR(100) NOT NULL,
+        remarks_timestamp TEXT
+      );
+    `);
+
     // Check if database needs seeding (check if users exist)
     const userCheck = await client.query("SELECT COUNT(*) FROM users;");
     const count = parseInt(userCheck.rows[0].count, 10);
@@ -131,6 +154,23 @@ async function initDatabase() {
         ('r-1', 'u-3', '2026-07-22', 'Completed testing of 200 fast charging circuits. Prepared inventory dispatch sheet.');
       `;
       await client.query(reportsQuery);
+
+      // Seed Items
+      const itemsQuery = `
+        INSERT INTO items (id, name, category) VALUES
+        ('I-1', 'Mak Charger 20W', 'Chargers'),
+        ('I-2', 'Lightning Cable 1.5m', 'Cables'),
+        ('I-3', 'Power Bank 20000mAh', 'Power Banks');
+      `;
+      await client.query(itemsQuery);
+
+      // Seed Orders
+      const ordersQuery = `
+        INSERT INTO new_orders (id, item_name, qty, amt, date, party_name, order_no, remarks_timestamp) VALUES
+        ('O-1', 'Mak Charger 20W', 50, 'Applicable', '2026-07-23', 'A1 Electronics', 'ORD-2026-001', 'Immediate dispatch'),
+        ('O-2', 'Lightning Cable 1.5m', 100, 'Not Applicable', '2026-07-22', 'Supreme Traders', 'ORD-2026-002', 'Deliver before 5 PM');
+      `;
+      await client.query(ordersQuery);
       
       console.log("Seeding complete!");
     } else {
@@ -176,13 +216,29 @@ app.get('/api/db', async (req, res) => {
         text 
       FROM reports
     `);
+    const itemsRes = await pool.query('SELECT * FROM items ORDER BY name ASC');
+    const ordersRes = await pool.query(`
+      SELECT 
+        id, 
+        item_name AS "itemName", 
+        qty, 
+        amt, 
+        date, 
+        party_name AS "partyName", 
+        order_no AS "orderNo", 
+        remarks_timestamp AS "remarksTimestamp" 
+      FROM new_orders 
+      ORDER BY date DESC, id DESC
+    `);
 
     res.json({
       users: usersRes.rows,
       tasks: tasksRes.rows,
       announcements: announcementsRes.rows,
       logs: logsRes.rows,
-      reports: reportsRes.rows
+      reports: reportsRes.rows,
+      items: itemsRes.rows,
+      orders: ordersRes.rows
     });
   } catch (err) {
     console.error(err);
@@ -341,6 +397,124 @@ app.post('/api/reports', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to submit report' });
+  }
+});
+
+// 7. Items Endpoints
+app.get('/api/items', async (req, res) => {
+  try {
+    const items = await pool.query('SELECT * FROM items ORDER BY name ASC');
+    res.json(items.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch items' });
+  }
+});
+
+app.post('/api/items', async (req, res) => {
+  const body = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const itemsToInsert = Array.isArray(body) ? body : [body];
+    
+    for (const item of itemsToInsert) {
+      const { id, name, category } = item;
+      const existCheck = await client.query('SELECT id FROM items WHERE name = $1', [name]);
+      if (existCheck.rows.length > 0) {
+        if (Array.isArray(body)) {
+          continue; // Skip duplicate item names in bulk upload
+        } else {
+          return res.status(400).json({ error: 'Item with this name already exists' });
+        }
+      }
+      await client.query(
+        'INSERT INTO items (id, name, category) VALUES ($1, $2, $3)',
+        [id, name, category]
+      );
+    }
+    
+    await client.query('COMMIT');
+    res.status(201).json({ message: 'Items saved successfully' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save items' });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/items/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM items WHERE id = $1', [id]);
+    res.json({ message: 'Item deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete item' });
+  }
+});
+
+// 8. Orders Endpoints
+app.get('/api/orders', async (req, res) => {
+  try {
+    const orders = await pool.query(`
+      SELECT 
+        id, 
+        item_name AS "itemName", 
+        qty, 
+        amt, 
+        date, 
+        party_name AS "partyName", 
+        order_no AS "orderNo", 
+        remarks_timestamp AS "remarksTimestamp" 
+      FROM new_orders 
+      ORDER BY date DESC, id DESC
+    `);
+    res.json(orders.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+});
+
+app.post('/api/orders', async (req, res) => {
+  const body = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const ordersToInsert = Array.isArray(body) ? body : [body];
+    
+    for (const order of ordersToInsert) {
+      const { id, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
+      const finalId = id || ('O-' + Date.now() + Math.random().toString(36).substr(2, 4));
+      
+      await client.query(
+        'INSERT INTO new_orders (id, item_name, qty, amt, date, party_name, order_no, remarks_timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO UPDATE SET item_name = EXCLUDED.item_name, qty = EXCLUDED.qty, amt = EXCLUDED.amt, date = EXCLUDED.date, party_name = EXCLUDED.party_name, order_no = EXCLUDED.order_no, remarks_timestamp = EXCLUDED.remarks_timestamp',
+        [finalId, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp]
+      );
+    }
+    
+    await client.query('COMMIT');
+    res.status(201).json({ message: 'Orders saved successfully' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save orders' });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/orders/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM new_orders WHERE id = $1', [id]);
+    res.json({ message: 'Order deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete order' });
   }
 });
 

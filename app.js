@@ -41,7 +41,9 @@
         tasks: [],
         announcements: [],
         logs: [],
-        reports: []
+        reports: [],
+        items: [],
+        orders: []
     };
 
     let currentUser = JSON.parse(sessionStorage.getItem("mp_active_user")) || null;
@@ -163,6 +165,14 @@
             });
         });
 
+        // Global delegation for dynamic forms
+        document.addEventListener("submit", (e) => {
+            if (e.target && e.target.id === "create-item-form") {
+                e.preventDefault();
+                handleCreateItem(e);
+            }
+        });
+
         // Check if session already exists
         if (currentUser) {
             enterPortal();
@@ -225,6 +235,16 @@
                 titleEl.textContent = "System Audit Trail";
                 subtitleEl.textContent = "Cryptographic audit trail of all staff activities";
                 break;
+            case "superadmin-items":
+            case "admin-items":
+                titleEl.textContent = "Item Details";
+                subtitleEl.textContent = "View and manage enterprise inventory assets";
+                break;
+            case "superadmin-orders":
+            case "admin-orders":
+                titleEl.textContent = "Order Management";
+                subtitleEl.textContent = "Upload existing orders and manage order schedules";
+                break;
             case "admin-dashboard":
                 titleEl.textContent = "Operational Control";
                 subtitleEl.textContent = `Operations overview for ${currentUser.name}`;
@@ -260,6 +280,14 @@
                 break;
             case "superadmin-logs":
                 renderLogsPage();
+                break;
+            case "superadmin-items":
+            case "admin-items":
+                renderItemsPage(pageId);
+                break;
+            case "superadmin-orders":
+            case "admin-orders":
+                renderOrdersPage(pageId);
                 break;
             case "admin-dashboard":
                 renderAdminMetrics();
@@ -1169,6 +1197,527 @@
         } catch (err) {
             showToast("Error submitting report: " + err.message, "error");
         }
+    }
+
+    // ==========================================
+    // 7. ITEM MANAGEMENT PAGE & LOGIC
+    // ==========================================
+    async function handleCreateItem(e) {
+        const nameInput = document.getElementById("item-name-input");
+        const categoryInput = document.getElementById("item-category-input");
+        
+        const name = nameInput.value.trim();
+        const category = categoryInput.value;
+
+        if (!name) {
+            showToast("Item name is required.", "error");
+            return;
+        }
+
+        if (db.items.some(item => item.name.toLowerCase() === name.toLowerCase())) {
+            showToast("Item with this name already exists in the database.", "error");
+            return;
+        }
+
+        const newItem = {
+            id: 'I-' + Date.now() + Math.random().toString(36).substr(2, 4),
+            name: name,
+            category: category
+        };
+
+        try {
+            const res = await fetch('/api/items', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newItem)
+            });
+            
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.error || "Failed to create item");
+            }
+            
+            await syncDatabase();
+            showToast(`Item "${name}" created successfully.`, "success");
+            await addLog(`User (${currentUser.name}) manually added item "${name}" (${newItem.id}).`, "success");
+            
+            nameInput.value = "";
+            renderItemsTableRows();
+        } catch (err) {
+            showToast(err.message, "error");
+        }
+    }
+
+    function renderItemsPage(pageId) {
+        const container = document.getElementById(`page-${pageId}`);
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="dashboard-grid">
+                <!-- Add / Upload Card -->
+                <div class="panel-card col-4">
+                    <div class="panel-header">
+                        <h2>Add Inventory Item</h2>
+                    </div>
+                    <div class="panel-body">
+                        <!-- Manual Form -->
+                        <form id="create-item-form" style="margin-bottom: 24px;">
+                            <div class="form-group">
+                                <label for="item-name-input">Item Name</label>
+                                <input type="text" id="item-name-input" required class="form-control" placeholder="e.g. Mak Fast Charger 20W">
+                            </div>
+                            <div class="form-group">
+                                <label for="item-category-input">Category</label>
+                                <select id="item-category-input" class="form-control">
+                                    <option value="Chargers">Chargers</option>
+                                    <option value="Cables">Cables</option>
+                                    <option value="Power Banks">Power Banks</option>
+                                    <option value="Packaging">Packaging</option>
+                                    <option value="Raw Material">Raw Material</option>
+                                    <option value="Others">Others</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">
+                                <i data-lucide="plus-circle"></i> Add Item
+                            </button>
+                        </form>
+
+                        <div style="border-top: 1px dashed var(--color-border); margin: 20px 0;"></div>
+
+                        <!-- Bulk Excel Upload -->
+                        <div>
+                            <h3 style="font-size: 14px; margin-bottom: 8px; font-weight:600;">Bulk Import via Excel</h3>
+                            <p style="font-size: 12px; color: var(--color-dark-muted); margin-bottom: 12px;">
+                                Upload an Excel file with columns: <strong>Item Name</strong> and <strong>Category</strong>. IDs will be auto-assigned.
+                            </p>
+                            <div class="form-group">
+                                <input type="file" id="item-excel-file" accept=".xlsx, .xls, .csv" class="form-control" style="padding: 4px 8px;">
+                            </div>
+                            <button id="import-items-excel-btn" class="btn btn-secondary btn-block" disabled>
+                                <i data-lucide="upload"></i> Upload & Import
+                            </button>
+                            <div id="items-excel-preview" style="margin-top: 12px; font-size:12px; font-weight:600;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Directory Card -->
+                <div class="panel-card col-8">
+                    <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
+                        <h2>Items Directory</h2>
+                        <div class="search-box-container" style="width: 250px;">
+                            <input type="text" id="items-search-input" class="form-control" placeholder="Search by name or category..." style="padding: 6px 12px; font-size: 13px;">
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Item Name</th>
+                                        <th>Category</th>
+                                        <th style="text-align: right;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="items-table-body">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        renderItemsTableRows();
+
+        const fileInput = document.getElementById("item-excel-file");
+        const importBtn = document.getElementById("import-items-excel-btn");
+        const previewDiv = document.getElementById("items-excel-preview");
+
+        let parsedItems = [];
+
+        fileInput.addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (!file) {
+                importBtn.disabled = true;
+                previewDiv.textContent = "";
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(firstSheet);
+                    
+                    parsedItems = json.map(row => {
+                        const nameKey = Object.keys(row).find(k => k.toLowerCase().replace(/[\s_]/g, '') === 'itemname');
+                        const categoryKey = Object.keys(row).find(k => k.toLowerCase() === 'category');
+                        
+                        return {
+                            id: 'I-' + Date.now() + Math.random().toString(36).substr(2, 4),
+                            name: (row[nameKey] || row['Item Name'] || row['name'] || '').toString().trim(),
+                            category: (row[categoryKey] || row['Category'] || row['category'] || 'Others').toString().trim()
+                        };
+                    }).filter(item => item.name);
+
+                    if (parsedItems.length === 0) {
+                        previewDiv.textContent = "No valid item rows found.";
+                        previewDiv.style.color = "var(--color-danger)";
+                        importBtn.disabled = true;
+                    } else {
+                        previewDiv.textContent = `Found ${parsedItems.length} items ready to import.`;
+                        previewDiv.style.color = "var(--color-success)";
+                        importBtn.disabled = false;
+                    }
+                } catch (err) {
+                    console.error(err);
+                    previewDiv.textContent = "Error parsing Excel file.";
+                    previewDiv.style.color = "var(--color-danger)";
+                    importBtn.disabled = true;
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        importBtn.addEventListener("click", async () => {
+            if (parsedItems.length === 0) return;
+            importBtn.disabled = true;
+            importBtn.textContent = "Importing...";
+            
+            try {
+                const res = await fetch('/api/items', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(parsedItems)
+                });
+                if (!res.ok) throw new Error("Failed to save imported items on server");
+                
+                await syncDatabase();
+                showToast(`Successfully imported ${parsedItems.length} items.`, "success");
+                await addLog(`User (${currentUser.name}) bulk imported ${parsedItems.length} items from Excel.`, "info");
+                
+                fileInput.value = "";
+                previewDiv.textContent = "";
+                renderItemsTableRows();
+            } catch (err) {
+                showToast("Import error: " + err.message, "error");
+            } finally {
+                importBtn.disabled = false;
+                importBtn.innerHTML = '<i data-lucide="upload"></i> Upload & Import';
+                lucide.createIcons();
+            }
+        });
+
+        const searchInput = document.getElementById("items-search-input");
+        searchInput.addEventListener("input", () => {
+            renderItemsTableRows(searchInput.value.trim().toLowerCase());
+        });
+
+        lucide.createIcons();
+    }
+
+    function renderItemsTableRows(filterQuery = "") {
+        const tbody = document.getElementById("items-table-body");
+        if (!tbody) return;
+        tbody.innerHTML = "";
+
+        let filteredItems = db.items;
+        if (filterQuery) {
+            filteredItems = db.items.filter(item => 
+                item.id.toLowerCase().includes(filterQuery) ||
+                item.name.toLowerCase().includes(filterQuery) ||
+                item.category.toLowerCase().includes(filterQuery)
+            );
+        }
+
+        if (filteredItems.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No items found. Add items to get started.</td></tr>`;
+            return;
+        }
+
+        filteredItems.forEach(item => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td style="font-weight:700; font-family: monospace; color:var(--color-primary);">${item.id}</td>
+                <td style="font-weight:600; color:var(--color-dark);">${item.name}</td>
+                <td><span class="badge" style="background:var(--color-border); color:var(--color-dark-light);">${item.category}</span></td>
+                <td style="text-align: right;">
+                    <button class="btn btn-icon delete-item-btn" data-id="${item.id}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);">
+                        <i data-lucide="trash-2" style="width:16px; height:16px;"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        tbody.querySelectorAll(".delete-item-btn").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                const id = e.currentTarget.dataset.id;
+                const item = db.items.find(i => i.id === id);
+                if (!item) return;
+
+                if (confirm(`Are you sure you want to delete "${item.name}"?`)) {
+                    try {
+                        const res = await fetch(`/api/items/${id}`, { method: 'DELETE' });
+                        if (!res.ok) throw new Error("Failed to delete item on server");
+                        await syncDatabase();
+                        showToast(`Deleted item "${item.name}".`, "info");
+                        await addLog(`User (${currentUser.name}) deleted item "${item.name}" (${id}).`, "warning");
+                        renderItemsTableRows(document.getElementById("items-search-input").value.trim().toLowerCase());
+                    } catch (err) {
+                        showToast("Delete error: " + err.message, "error");
+                    }
+                }
+            });
+        });
+
+        lucide.createIcons();
+    }
+
+    // ==========================================
+    // 8. ORDERS MANAGEMENT PAGE & LOGIC
+    // ==========================================
+    function renderOrdersPage(pageId) {
+        const container = document.getElementById(`page-${pageId}`);
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="dashboard-grid">
+                <!-- Excel Import Card -->
+                <div class="panel-card col-4">
+                    <div class="panel-header">
+                        <h2>Upload Orders (Excel)</h2>
+                    </div>
+                    <div class="panel-body">
+                        <p style="font-size: 13px; color: var(--color-dark-muted); margin-bottom: 16px;">
+                            Upload an Excel file containing orders. The columns in the file must map to:
+                            <br>
+                            <code>Item Name</code>, <code>Qty</code>, <code>AMT</code>, <code>Date</code>, <code>Party Name</code>, <code>Order NO</code>, <code>Remarks&Timestamp</code>, <code>Id</code>
+                        </p>
+                        
+                        <div class="form-group">
+                            <input type="file" id="orders-excel-file" accept=".xlsx, .xls, .csv" class="form-control" style="padding: 4px 8px;">
+                        </div>
+                        <button id="import-orders-excel-btn" class="btn btn-primary btn-block" disabled>
+                            <i data-lucide="upload-cloud"></i> Parse & Save Orders
+                        </button>
+                        <div id="orders-excel-preview" style="margin-top: 14px; font-size:13px; font-weight:600;"></div>
+                    </div>
+                </div>
+
+                <!-- Orders List Card -->
+                <div class="panel-card col-8">
+                    <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
+                        <h2>Orders Directory</h2>
+                        <div class="search-box-container" style="width: 250px;">
+                            <input type="text" id="orders-search-input" class="form-control" placeholder="Search Party or Order NO..." style="padding: 6px 12px; font-size: 13px;">
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Order NO</th>
+                                        <th>Item Name</th>
+                                        <th>Qty</th>
+                                        <th>AMT (Scheme)</th>
+                                        <th>Date</th>
+                                        <th>Party Name</th>
+                                        <th>Remarks</th>
+                                        <th style="text-align: right;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="orders-table-body">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        renderOrdersPageHandlers();
+        lucide.createIcons();
+    }
+
+    function renderOrdersPageHandlers() {
+        const fileInput = document.getElementById("orders-excel-file");
+        const importBtn = document.getElementById("import-orders-excel-btn");
+        const previewDiv = document.getElementById("orders-excel-preview");
+        if (!fileInput || !importBtn || !previewDiv) return;
+
+        let parsedOrders = [];
+
+        fileInput.addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (!file) {
+                importBtn.disabled = true;
+                previewDiv.textContent = "";
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(firstSheet);
+                    
+                    parsedOrders = json.map(row => {
+                        const findKey = (candidates) => {
+                            return Object.keys(row).find(k => 
+                                candidates.includes(k.toLowerCase().replace(/[\s_&]/g, ''))
+                            );
+                        };
+
+                        const itemKey = findKey(['itemname', 'item']);
+                        const qtyKey = findKey(['qty', 'quantity']);
+                        const amtKey = findKey(['amt', 'amount', 'scheme']);
+                        const dateKey = findKey(['date', 'orderdate']);
+                        const partyKey = findKey(['partyname', 'party']);
+                        const orderNoKey = findKey(['orderno', 'ordernumber']);
+                        const remarksKey = findKey(['remarkstimestamp', 'remarks', 'timestamp']);
+                        const idKey = findKey(['id', 'orderid']);
+
+                        return {
+                            id: (row[idKey] || row['Id'] || '').toString().trim() || ('O-' + Date.now() + Math.random().toString(36).substr(2, 4)),
+                            itemName: (row[itemKey] || row['Item Name'] || '').toString().trim(),
+                            qty: parseInt(row[qtyKey] || row['Qty'] || 0, 10),
+                            amt: (row[amtKey] || row['AMT'] || '').toString().trim(),
+                            date: (row[dateKey] || row['Date'] || new Date().toISOString().split('T')[0]).toString().trim(),
+                            partyName: (row[partyKey] || row['Party Name'] || '').toString().trim(),
+                            orderNo: (row[orderNoKey] || row['Order NO'] || '').toString().trim(),
+                            remarksTimestamp: (row[remarksKey] || row['Remarks&Timestamp'] || '').toString().trim()
+                        };
+                    }).filter(ord => ord.itemName && ord.partyName);
+
+                    if (parsedOrders.length === 0) {
+                        previewDiv.textContent = "No valid orders found in file.";
+                        previewDiv.style.color = "var(--color-danger)";
+                        importBtn.disabled = true;
+                    } else {
+                        previewDiv.textContent = `${parsedOrders.length} orders loaded from file.`;
+                        previewDiv.style.color = "var(--color-success)";
+                        importBtn.disabled = false;
+                    }
+                } catch (err) {
+                    console.error(err);
+                    previewDiv.textContent = "Failed to parse Excel file.";
+                    previewDiv.style.color = "var(--color-danger)";
+                    importBtn.disabled = true;
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        importBtn.addEventListener("click", async () => {
+            if (parsedOrders.length === 0) return;
+            importBtn.disabled = true;
+            importBtn.textContent = "Saving...";
+
+            try {
+                const res = await fetch('/api/orders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(parsedOrders)
+                });
+                if (!res.ok) throw new Error("Failed to save orders on server");
+
+                await syncDatabase();
+                showToast(`Successfully saved ${parsedOrders.length} orders!`, "success");
+                await addLog(`User (${currentUser.name}) uploaded and saved ${parsedOrders.length} orders via Excel.`, "info");
+
+                fileInput.value = "";
+                previewDiv.textContent = "";
+                renderOrdersTableRows();
+            } catch (err) {
+                showToast("Save error: " + err.message, "error");
+            } finally {
+                importBtn.disabled = false;
+                importBtn.innerHTML = '<i data-lucide="upload-cloud"></i> Parse & Save Orders';
+                lucide.createIcons();
+            }
+        });
+
+        const searchInput = document.getElementById("orders-search-input");
+        if (searchInput) {
+            searchInput.addEventListener("input", () => {
+                renderOrdersTableRows(searchInput.value.trim().toLowerCase());
+            });
+        }
+    }
+
+    function renderOrdersTableRows(filterQuery = "") {
+        const tbody = document.getElementById("orders-table-body");
+        if (!tbody) return;
+        tbody.innerHTML = "";
+
+        let filteredOrders = db.orders;
+        if (filterQuery) {
+            filteredOrders = db.orders.filter(ord => 
+                ord.id.toLowerCase().includes(filterQuery) ||
+                ord.orderNo.toLowerCase().includes(filterQuery) ||
+                ord.itemName.toLowerCase().includes(filterQuery) ||
+                ord.partyName.toLowerCase().includes(filterQuery)
+            );
+        }
+
+        if (filteredOrders.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No orders found. Import your first Excel sheet.</td></tr>`;
+            return;
+        }
+
+        filteredOrders.forEach(ord => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td style="font-family: monospace; font-size:11px; color: var(--color-dark-muted);">${ord.id}</td>
+                <td style="font-weight:700; color: var(--color-dark);">${ord.orderNo}</td>
+                <td style="font-weight:600; color: var(--color-primary);">${ord.itemName}</td>
+                <td><span style="font-weight:700; color:var(--color-dark);">${ord.qty}</span></td>
+                <td><span class="badge ${ord.amt.toLowerCase().includes('not') ? 'badge-suspended' : 'badge-success'}">${ord.amt}</span></td>
+                <td style="white-space:nowrap;">${ord.date}</td>
+                <td style="font-weight:600; color: var(--color-dark-light);">${ord.partyName}</td>
+                <td style="font-size:12px; color: var(--color-dark-muted); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${ord.remarksTimestamp}">${ord.remarksTimestamp}</td>
+                <td style="text-align: right;">
+                    <button class="btn btn-icon delete-order-btn" data-id="${ord.id}" style="width:28px; height:28px; padding:0; background:none; border:none; color:var(--color-danger);">
+                        <i data-lucide="trash-2" style="width:16px; height:16px;"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        tbody.querySelectorAll(".delete-order-btn").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                const id = e.currentTarget.dataset.id;
+                const ord = db.orders.find(o => o.id === id);
+                if (!ord) return;
+
+                if (confirm(`Remove order "${ord.orderNo}" for ${ord.partyName}?`)) {
+                    try {
+                        const res = await fetch(`/api/orders/${id}`, { method: 'DELETE' });
+                        if (!res.ok) throw new Error("Failed to delete order on server");
+                        await syncDatabase();
+                        showToast(`Deleted order "${ord.orderNo}".`, "info");
+                        await addLog(`User (${currentUser.name}) deleted order "${ord.orderNo}" (${id}).`, "warning");
+                        renderOrdersTableRows(document.getElementById("orders-search-input").value.trim().toLowerCase());
+                    } catch (err) {
+                        showToast("Delete error: " + err.message, "error");
+                    }
+                }
+            });
+        });
+
+        lucide.createIcons();
     }
 
     // Expose routing globally for navigation helpers

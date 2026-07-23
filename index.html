@@ -10,6 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- SheetJS for Excel Uploads -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -101,6 +103,12 @@
                             <a href="#" class="nav-item" data-target="superadmin-logs">
                                 <i data-lucide="scroll-text"></i> System Logs
                             </a>
+                            <a href="#" class="nav-item" data-target="superadmin-items">
+                                <i data-lucide="package"></i> Item Details
+                            </a>
+                            <a href="#" class="nav-item" data-target="superadmin-orders">
+                                <i data-lucide="file-spreadsheet"></i> Orders
+                            </a>
                         </div>
 
                         <!-- Admin Nav -->
@@ -113,6 +121,12 @@
                             </a>
                             <a href="#" class="nav-item" data-target="admin-announcements">
                                 <i data-lucide="megaphone"></i> Announcements
+                            </a>
+                            <a href="#" class="nav-item" data-target="admin-items">
+                                <i data-lucide="package"></i> Item Details
+                            </a>
+                            <a href="#" class="nav-item" data-target="admin-orders">
+                                <i data-lucide="file-spreadsheet"></i> Orders
                             </a>
                         </div>
 
@@ -591,6 +605,14 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Item Details Pages -->
+                        <div id="page-superadmin-items" class="portal-page hidden"></div>
+                        <div id="page-admin-items" class="portal-page hidden"></div>
+
+                        <!-- Orders Pages -->
+                        <div id="page-superadmin-orders" class="portal-page hidden"></div>
+                        <div id="page-admin-orders" class="portal-page hidden"></div>
 
                     </div>
                 </main>
