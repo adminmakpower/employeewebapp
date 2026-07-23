@@ -1953,7 +1953,13 @@
                         };
 
                         const itemKey = findKey(['itemname', 'item']);
-                        const itemIdCodeKey = findKey(['itemid', 'itemcode', 'itemidcode']);
+                        
+                        // Extremely robust matching for Item ID columns (like item_id, itemid, itemcode, Item ID, etc.)
+                        const itemIdCodeKey = Object.keys(row).find(k => {
+                            const kClean = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            return kClean === 'itemid' || kClean === 'itemcode' || kClean === 'itemidcode' || kClean === 'code' || kClean.includes('itemid');
+                        }) || findKey(['itemid', 'itemcode', 'itemidcode']);
+
                         const qtyKey = findKey(['qty', 'quantity']);
                         const amtKey = findKey(['amt', 'amount', 'scheme']);
                         const dateKey = findKey(['date', 'orderdate']);
@@ -1980,7 +1986,8 @@
                         previewDiv.style.color = "var(--color-danger)";
                         importBtn.disabled = true;
                     } else {
-                        previewDiv.textContent = `${parsedOrders.length} orders loaded from file.`;
+                        const exampleId = parsedOrders[0].itemIdCode || 'None';
+                        previewDiv.textContent = `${parsedOrders.length} orders loaded. (Example Item ID: "${exampleId}")`;
                         previewDiv.style.color = "var(--color-success)";
                         importBtn.disabled = false;
                     }

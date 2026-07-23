@@ -281,6 +281,7 @@ app.get('/api/db', async (req, res) => {
       SELECT 
         o.id, 
         o.item_id AS "itemId",
+        o.item_id_code AS "itemIdCode",
         i.name AS "itemName", 
         o.qty, 
         o.amt, 
