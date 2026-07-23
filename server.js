@@ -449,22 +449,49 @@ app.post('/api/items', async (req, res) => {
     await client.query('BEGIN');
     const itemsToInsert = Array.isArray(body) ? body : [body];
     
+    if (itemsToInsert.length === 0) {
+      await client.query('COMMIT');
+      return res.status(201).json({ message: 'No items to save' });
+    }
+
+    const valueParams = [];
+    const valuePlaceholders = [];
+    let counter = 1;
+    
     for (const item of itemsToInsert) {
-      const { name, category } = item;
-      if (!name) continue;
-      
-      const insertRes = await client.query(
-        'INSERT INTO items (name, category) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING RETURNING id',
-        [name, category]
-      );
-      
-      if (insertRes.rows.length > 0) {
-        const newItemId = insertRes.rows[0].id;
+      if (!item.name) continue;
+      valuePlaceholders.push(`($${counter}, $${counter + 1})`);
+      valueParams.push(item.name.trim(), item.category || 'Others');
+      counter += 2;
+    }
+
+    if (valueParams.length > 0) {
+      const insertQuery = `
+        INSERT INTO items (name, category) 
+        VALUES ${valuePlaceholders.join(', ')} 
+        ON CONFLICT (name) DO NOTHING 
+        RETURNING id, name
+      `;
+      const insertRes = await client.query(insertQuery, valueParams);
+      const insertedItems = insertRes.rows;
+
+      if (insertedItems.length > 0) {
+        const historyParams = [];
+        const historyPlaceholders = [];
+        let hCounter = 1;
         const importMethod = Array.isArray(body) ? 'bulk import' : 'manual addition';
-        await client.query(
-          'INSERT INTO item_history (item_id, action, details) VALUES ($1, $2, $3)',
-          [newItemId, 'create', `Item created via ${importMethod}`]
-        );
+        
+        for (const item of insertedItems) {
+          historyPlaceholders.push(`($${hCounter}, 'create', $${hCounter + 1})`);
+          historyParams.push(item.id, `Item created via ${importMethod}`);
+          hCounter += 2;
+        }
+
+        const historyQuery = `
+          INSERT INTO item_history (item_id, action, details) 
+          VALUES ${historyPlaceholders.join(', ')}
+        `;
+        await client.query(historyQuery, historyParams);
       } else {
         if (!Array.isArray(body)) {
           if (client) await client.query('ROLLBACK');
@@ -595,14 +622,47 @@ app.post('/api/orders', async (req, res) => {
     await client.query('BEGIN');
     const ordersToInsert = Array.isArray(body) ? body : [body];
     
+    if (ordersToInsert.length === 0) {
+      await client.query('COMMIT');
+      return res.status(201).json({ message: 'No orders to save' });
+    }
+
+    const valueParams = [];
+    const valuePlaceholders = [];
+    let counter = 1;
+    
     for (const order of ordersToInsert) {
       const { id, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
-      const finalId = id || ('O-' + Date.now() + Math.random().toString(36).substr(2, 4));
+      const finalId = id || ('O-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + counter);
       
-      await client.query(
-        'INSERT INTO new_orders (id, item_name, qty, amt, date, party_name, order_no, remarks_timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO UPDATE SET item_name = EXCLUDED.item_name, qty = EXCLUDED.qty, amt = EXCLUDED.amt, date = EXCLUDED.date, party_name = EXCLUDED.party_name, order_no = EXCLUDED.order_no, remarks_timestamp = EXCLUDED.remarks_timestamp',
-        [finalId, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp]
+      valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6}, $${counter+7})`);
+      valueParams.push(
+        finalId, 
+        itemName ? itemName.trim() : '', 
+        parseInt(qty, 10) || 0, 
+        amt ? amt.trim() : '', 
+        date ? date.trim() : '', 
+        partyName ? partyName.trim() : '', 
+        orderNo ? orderNo.trim() : '', 
+        remarksTimestamp ? remarksTimestamp.trim() : ''
       );
+      counter += 8;
+    }
+    
+    if (valueParams.length > 0) {
+      const insertQuery = `
+        INSERT INTO new_orders (id, item_name, qty, amt, date, party_name, order_no, remarks_timestamp) 
+        VALUES ${valuePlaceholders.join(', ')} 
+        ON CONFLICT (id) DO UPDATE SET 
+          item_name = EXCLUDED.item_name, 
+          qty = EXCLUDED.qty, 
+          amt = EXCLUDED.amt, 
+          date = EXCLUDED.date, 
+          party_name = EXCLUDED.party_name, 
+          order_no = EXCLUDED.order_no, 
+          remarks_timestamp = EXCLUDED.remarks_timestamp
+      `;
+      await client.query(insertQuery, valueParams);
     }
     
     await client.query('COMMIT');
