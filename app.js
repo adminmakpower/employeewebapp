@@ -49,10 +49,12 @@
     let currentUser = JSON.parse(localStorage.getItem("mp_active_user")) || null;
     let activePage = null;
     let ordersCurrentPage = parseInt(localStorage.getItem("orders_current_page") || "1", 10);
+    let isSyncingDb = false;
     let selectedOrderIds = new Set();
 
     // Fetch database state from server
     async function syncDatabase() {
+        isSyncingDb = true;
         try {
             const res = await fetch('/api/db');
             if (res.ok) {
@@ -62,6 +64,8 @@
             }
         } catch (err) {
             console.error("Error connecting to server database", err);
+        } finally {
+            isSyncingDb = false;
         }
     }
 
@@ -98,11 +102,17 @@
     // ==========================================
     // 2. INITIALIZATION & ROUTING
     // ==========================================
-    window.addEventListener("DOMContentLoaded", async () => {
-        await syncDatabase();
+    window.addEventListener("DOMContentLoaded", () => {
         initApp();
         startClock();
         lucide.createIcons();
+        
+        // Fetch database state in background to prevent flickering or temporary logout
+        syncDatabase().then(() => {
+            if (activePage) {
+                loadPageData(activePage);
+            }
+        });
     });
 
     function initApp() {
@@ -168,6 +178,27 @@
                 e.preventDefault();
                 const targetPage = e.currentTarget.dataset.target;
                 
+                // Clear page filters on navigation click so pages open with a fresh, full view
+                if (targetPage.includes("orders")) {
+                    localStorage.removeItem("orders_filter_search");
+                    localStorage.removeItem("orders_filter_start");
+                    localStorage.removeItem("orders_filter_end");
+                    localStorage.removeItem("orders_current_page");
+                    
+                    const searchInput = document.getElementById("orders-search-input");
+                    const startDateInput = document.getElementById("orders-filter-start-date");
+                    const endDateInput = document.getElementById("orders-filter-end-date");
+                    if (searchInput) searchInput.value = "";
+                    if (startDateInput) startDateInput.value = "";
+                    if (endDateInput) endDateInput.value = "";
+                    ordersCurrentPage = 1;
+                }
+                if (targetPage.includes("items")) {
+                    localStorage.removeItem("items_filter_search");
+                    const itemSearch = document.getElementById("items-search-input");
+                    if (itemSearch) itemSearch.value = "";
+                }
+
                 document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
                 e.currentTarget.classList.add("active");
                 
@@ -2299,14 +2330,28 @@
             filteredOrders = filteredOrders.filter(ord => {
                 const ordDate = String(ord.date || '').trim();
                 if (!ordDate) return false;
-                if (startDateVal && ordDate < startDateVal) return false;
-                if (endDateVal && ordDate > endDateVal) return false;
+                
+                if (startDateVal && endDateVal) {
+                    // Both From and To present: range match
+                    return ordDate >= startDateVal && ordDate <= endDateVal;
+                } else if (startDateVal) {
+                    // Only From present: match specific date
+                    return ordDate === startDateVal;
+                } else if (endDateVal) {
+                    // Only To present: match specific date
+                    return ordDate === endDateVal;
+                }
                 return true;
             });
         }
 
         if (filteredOrders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No orders found. Import your first Excel sheet.</td></tr>`;
+            if (isSyncingDb) {
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 24px; color: var(--color-primary);"><i data-lucide="refresh-cw" class="spin-icon" style="display:inline-block; width:16px; height:16px; margin-right:8px; vertical-align:middle;"></i> Loading directory database...</td></tr>`;
+                lucide.createIcons();
+            } else {
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 24px; color: var(--color-dark-muted);">No orders found.</td></tr>`;
+            }
             if (pagContainer) pagContainer.innerHTML = "";
             return;
         }
