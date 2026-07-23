@@ -126,20 +126,24 @@ async function initDatabase() {
       );
     `);
 
-    // 7. Migrating new_orders table if it has the old column layout
+    // 7. Migrating new_orders table if it has the old column layout or type layout
     const ordersColCheck = await client.query(`
-      SELECT column_name FROM information_schema.columns 
-      WHERE table_name = 'new_orders' AND column_name = 'item_id';
+      SELECT column_name, data_type FROM information_schema.columns 
+      WHERE table_name = 'new_orders';
     `);
-    if (ordersColCheck.rows.length === 0) {
-      console.log("Migrating new_orders table to support relational item_id...");
+    const hasItemId = ordersColCheck.rows.some(r => r.column_name === 'item_id');
+    const idCol = ordersColCheck.rows.find(r => r.column_name === 'id');
+    const isIdVarchar = idCol && idCol.data_type === 'character varying';
+    
+    if (!hasItemId || isIdVarchar) {
+      console.log("Migrating new_orders table to support serial integer id and relational item_id...");
       await client.query('DROP TABLE IF EXISTS new_orders CASCADE;');
     }
 
-    // 7. New Orders Table (linked to items table via item_id)
+    // 7. New Orders Table (linked to items table via item_id with auto-incrementing integer id)
     await client.query(`
       CREATE TABLE IF NOT EXISTS new_orders (
-        id VARCHAR(50) PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
         qty INTEGER NOT NULL,
         amt VARCHAR(100) NOT NULL,
@@ -733,7 +737,7 @@ app.post('/api/orders', async (req, res) => {
     }
 
     // 4. Construct values and placeholders for bulk inserting orders in batches
-    // Batch size of 5000 to prevent exceeding PostgreSQL's 65535 parameter formats limit (each order has 8 parameters)
+    // Batch size of 5000 to prevent exceeding PostgreSQL's 65535 parameter formats limit (each order has 7 parameters)
     const ORDER_BATCH_SIZE = 5000;
     
     for (let i = 0; i < ordersToInsert.length; i += ORDER_BATCH_SIZE) {
@@ -742,12 +746,8 @@ app.post('/api/orders', async (req, res) => {
       const valuePlaceholders = [];
       let counter = 1;
       
-      // Deduplicate within the batch itself to prevent PostgreSQL "cannot affect row a second time" error
-      const seenIds = new Set();
-      
       for (const order of batch) {
-        const { id, itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
-        const finalId = id || ('O-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7) + '-' + (i + counter));
+        const { itemName, qty, amt, date, partyName, orderNo, remarksTimestamp } = order;
         
         const nameClean = itemName ? itemName.toLowerCase().trim() : '';
         const itemId = itemMap.get(nameClean);
@@ -756,14 +756,8 @@ app.post('/api/orders', async (req, res) => {
           continue;
         }
         
-        if (seenIds.has(finalId)) {
-          continue;
-        }
-        seenIds.add(finalId);
-        
-        valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6}, $${counter+7})`);
+        valuePlaceholders.push(`($${counter}, $${counter+1}, $${counter+2}, $${counter+3}, $${counter+4}, $${counter+5}, $${counter+6})`);
         valueParams.push(
-          finalId, 
           itemId, 
           parseInt(qty, 10) || 0, 
           amt ? amt.trim() : '', 
@@ -772,24 +766,16 @@ app.post('/api/orders', async (req, res) => {
           orderNo ? orderNo.trim() : '', 
           remarksTimestamp ? remarksTimestamp.trim() : ''
         );
-        counter += 8;
+        counter += 7;
       }
       
       if (valueParams.length > 0) {
         const insertQuery = `
-          INSERT INTO new_orders (id, item_id, qty, amt, date, party_name, order_no, remarks_timestamp) 
-          VALUES ${valuePlaceholders.join(', ')} 
-          ON CONFLICT (id) DO UPDATE SET 
-            item_id = EXCLUDED.item_id, 
-            qty = EXCLUDED.qty, 
-            amt = EXCLUDED.amt, 
-            date = EXCLUDED.date, 
-            party_name = EXCLUDED.party_name, 
-            order_no = EXCLUDED.order_no, 
-            remarks_timestamp = EXCLUDED.remarks_timestamp
+          INSERT INTO new_orders (item_id, qty, amt, date, party_name, order_no, remarks_timestamp) 
+          VALUES ${valuePlaceholders.join(', ')}
         `;
         await client.query(insertQuery, valueParams);
-        writeToLogFile('info', `Batch insert: successfully saved ${valueParams.length / 8} orders.`);
+        writeToLogFile('info', `Batch insert: successfully saved ${valueParams.length / 7} orders.`);
       }
     }
     
