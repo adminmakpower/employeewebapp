@@ -822,6 +822,34 @@ app.get('/api/server-logs', (req, res) => {
   }
 });
 
+app.get('/api/storage-info', async (req, res) => {
+  try {
+    const sizeRes = await pool.query('SELECT pg_database_size(current_database()) AS size;');
+    const sizeBytes = parseInt(sizeRes.rows[0].size, 10);
+    
+    // Neon Free Tier storage limit: 512 MB
+    const limitBytes = 512 * 1024 * 1024;
+    const usedMb = (sizeBytes / (1024 * 1024)).toFixed(2);
+    const limitMb = (limitBytes / (1024 * 1024)).toFixed(2);
+    const availableBytes = Math.max(0, limitBytes - sizeBytes);
+    const availableMb = (availableBytes / (1024 * 1024)).toFixed(2);
+    const pctUsed = ((sizeBytes / limitBytes) * 100).toFixed(1);
+    
+    res.json({
+      usedBytes: sizeBytes,
+      usedMb: parseFloat(usedMb),
+      limitBytes: limitBytes,
+      limitMb: parseFloat(limitMb),
+      availableBytes: availableBytes,
+      availableMb: parseFloat(availableMb),
+      percentageUsed: parseFloat(pctUsed)
+    });
+  } catch (err) {
+    writeToLogFile('error', `Error retrieving storage info: ${err.message}`);
+    res.status(500).json({ error: 'Failed to retrieve storage info' });
+  }
+});
+
 // Serve static assets from Vite's build folder
 app.use(express.static(path.join(__dirname, 'dist')));
 

@@ -484,7 +484,7 @@
     // ==========================================
     // 4. SUPER ADMIN CONTROLS
     // ==========================================
-    function renderSuperAdminMetrics() {
+    async function renderSuperAdminMetrics() {
         const adminCount = db.users.filter(u => u.role === "admin").length;
         const employeeCount = db.users.filter(u => u.role === "employee").length;
         const totalTasks = db.tasks.length;
@@ -497,6 +497,23 @@
         document.getElementById("legend-super-count").textContent = db.users.filter(u => u.role === "superadmin").length;
         document.getElementById("legend-admin-count").textContent = adminCount;
         document.getElementById("legend-emp-count").textContent = employeeCount;
+
+        // Fetch database storage size info from Neon dynamically
+        try {
+            const res = await fetch('/api/storage-info');
+            if (res.ok) {
+                const info = await res.json();
+                const availEl = document.getElementById("stat-storage-avail");
+                const progressEl = document.getElementById("stat-storage-progress");
+                if (availEl && progressEl) {
+                    availEl.textContent = `${info.availableMb} MB`;
+                    progressEl.style.width = `${info.percentageUsed}%`;
+                    availEl.title = `Used: ${info.usedMb} MB / ${info.limitMb} MB (${info.percentageUsed}%)`;
+                }
+            }
+        } catch (err) {
+            console.error("Failed to load storage metrics:", err);
+        }
     }
 
     function renderSuperAdminRecentUsers() {
