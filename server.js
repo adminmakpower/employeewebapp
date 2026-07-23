@@ -451,26 +451,26 @@ app.post('/api/items', async (req, res) => {
     
     for (const item of itemsToInsert) {
       const { name, category } = item;
-      const existCheck = await client.query('SELECT id FROM items WHERE name = $1', [name]);
-      if (existCheck.rows.length > 0) {
-        if (Array.isArray(body)) {
-          continue; // Skip duplicate item names in bulk upload
-        } else {
+      if (!name) continue;
+      
+      const insertRes = await client.query(
+        'INSERT INTO items (name, category) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING RETURNING id',
+        [name, category]
+      );
+      
+      if (insertRes.rows.length > 0) {
+        const newItemId = insertRes.rows[0].id;
+        const importMethod = Array.isArray(body) ? 'bulk import' : 'manual addition';
+        await client.query(
+          'INSERT INTO item_history (item_id, action, details) VALUES ($1, $2, $3)',
+          [newItemId, 'create', `Item created via ${importMethod}`]
+        );
+      } else {
+        if (!Array.isArray(body)) {
           if (client) await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Item with this name already exists' });
         }
       }
-      const insertRes = await client.query(
-        'INSERT INTO items (name, category) VALUES ($1, $2) RETURNING id',
-        [name, category]
-      );
-      
-      const newItemId = insertRes.rows[0].id;
-      const importMethod = Array.isArray(body) ? 'bulk import' : 'manual addition';
-      await client.query(
-        'INSERT INTO item_history (item_id, action, details) VALUES ($1, $2, $3)',
-        [newItemId, 'create', `Item created via ${importMethod}`]
-      );
     }
     
     await client.query('COMMIT');
