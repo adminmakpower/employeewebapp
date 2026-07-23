@@ -1784,21 +1784,32 @@
                 remarksTimestamp: overlay.querySelector("#edit-ord-remarks").value.trim()
             };
             
-            try {
-                const res = await fetch(`/api/orders/${ord.id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(updatedData)
-                });
-                if (!res.ok) throw new Error("Failed to update order on server");
-                
-                await syncDatabase();
-                showToast("Order updated successfully!", "success");
-                overlay.remove();
-                renderOrdersTableRows();
-            } catch (err) {
-                showToast("Update error: " + err.message, "error");
+            // 1. Optimistic Update local state immediately
+            const localOrd = db.orders.find(o => o.id === ord.id);
+            if (localOrd) {
+                Object.assign(localOrd, updatedData);
             }
+            
+            // 2. Refresh the table instantly (under 0.01 seconds!)
+            renderOrdersTableRows(document.getElementById("orders-search-input") ? document.getElementById("orders-search-input").value.trim().toLowerCase() : "");
+            showToast("Saving changes...", "info");
+            overlay.remove();
+
+            // 3. Save to server in the background (asynchronously)
+            fetch(`/api/orders/${ord.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedData)
+            })
+            .then(async res => {
+                if (!res.ok) throw new Error("Failed to save changes on server");
+                showToast("Order saved successfully!", "success");
+                // Background sync
+                syncDatabase();
+            })
+            .catch(err => {
+                showToast("Sync error: " + err.message, "error");
+            });
         });
     }
     // ==========================================
@@ -2422,18 +2433,23 @@
                 if (!ord) return;
 
                 if (confirm(`Remove order "${ord.orderNo}" for ${ord.partyName}?`)) {
-                    try {
-                        const res = await fetch(`/api/orders/${id}`, { method: 'DELETE' });
+                    // 1. Remove from local list instantly
+                    db.orders = db.orders.filter(o => o.id !== id);
+                    selectedOrderIds.delete(id);
+                    renderOrdersTableRows(document.getElementById("orders-search-input") ? document.getElementById("orders-search-input").value.trim().toLowerCase() : "");
+                    showToast("Deleting order...", "info");
+
+                    // 2. Perform delete on server in background
+                    fetch(`/api/orders/${id}`, { method: 'DELETE' })
+                    .then(async res => {
                         if (!res.ok) throw new Error("Failed to delete order on server");
-                        
-                        selectedOrderIds.delete(id);
-                        await syncDatabase();
                         showToast(`Successfully deleted order "${ord.orderNo}"!`, "success");
                         await addLog(`User (${currentUser.name}) deleted order "${ord.orderNo}".`, "info");
-                        renderOrdersTableRows(document.getElementById("orders-search-input") ? document.getElementById("orders-search-input").value.trim().toLowerCase() : "");
-                    } catch (err) {
-                        showToast("Delete error: " + err.message, "error");
-                    }
+                        syncDatabase();
+                    })
+                    .catch(err => {
+                        showToast("Delete sync error: " + err.message, "error");
+                    });
                 }
             });
         });
