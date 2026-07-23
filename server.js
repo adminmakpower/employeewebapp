@@ -1,11 +1,24 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
+const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const logFilePath = path.join(__dirname, 'server.log');
+
+function writeToLogFile(level, message) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${message}\n`;
+  fs.appendFile(logFilePath, logMessage, (err) => {
+    if (err) console.error("Failed to write to log file:", err);
+  });
+  console.log(logMessage.trim());
+}
+
+writeToLogFile('info', 'System initializing...');
 
 // Enable CORS and JSON parsing
 app.use(cors());
@@ -461,9 +474,11 @@ app.post('/api/items', async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
     const itemsToInsert = Array.isArray(body) ? body : [body];
+    writeToLogFile('info', `Received request to upload ${itemsToInsert.length} items.`);
     
     if (itemsToInsert.length === 0) {
       await client.query('COMMIT');
+      writeToLogFile('info', 'No items to save.');
       return res.status(201).json({ message: 'No items to save' });
     }
 
@@ -492,6 +507,7 @@ app.post('/api/items', async (req, res) => {
         `;
         const insertRes = await client.query(insertQuery, valueParams);
         const insertedItems = insertRes.rows;
+        writeToLogFile('info', `Batch insert: saved ${insertedItems.length} new items into directory.`);
 
         if (insertedItems.length > 0) {
           const historyParams = [];
@@ -510,9 +526,11 @@ app.post('/api/items', async (req, res) => {
             VALUES ${historyPlaceholders.join(', ')}
           `;
           await client.query(historyQuery, historyParams);
+          writeToLogFile('info', `Batch history: logged audit trail for ${insertedItems.length} items.`);
         } else {
           if (!Array.isArray(body)) {
             if (client) await client.query('ROLLBACK');
+            writeToLogFile('warning', 'Manual item upload rejected: Name already exists.');
             return res.status(400).json({ error: 'Item with this name already exists' });
           }
         }
@@ -520,10 +538,11 @@ app.post('/api/items', async (req, res) => {
     }
     
     await client.query('COMMIT');
+    writeToLogFile('info', `Successfully committed transaction and saved items.`);
     res.status(201).json({ message: 'Items saved successfully' });
   } catch (err) {
     if (client) await client.query('ROLLBACK');
-    console.error("Error saving items:", err);
+    writeToLogFile('error', `Error saving items: ${err.stack}`);
     res.status(500).json({ error: 'Failed to save items: ' + err.message });
   } finally {
     if (client) client.release();
@@ -642,9 +661,11 @@ app.post('/api/orders', async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
     const ordersToInsert = Array.isArray(body) ? body : [body];
+    writeToLogFile('info', `Received request to upload ${ordersToInsert.length} orders.`);
     
     if (ordersToInsert.length === 0) {
       await client.query('COMMIT');
+      writeToLogFile('info', 'No orders to save.');
       return res.status(201).json({ message: 'No orders to save' });
     }
 
@@ -666,6 +687,7 @@ app.post('/api/orders', async (req, res) => {
 
     // 3. Bulk insert missing items if any (batched to prevent parameter format limit)
     if (missingNames.size > 0) {
+      writeToLogFile('info', `Found ${missingNames.size} missing items in order upload. Registering them...`);
       const missingArray = Array.from(missingNames);
       const ITEM_BATCH_SIZE = 10000;
       
@@ -690,6 +712,7 @@ app.post('/api/orders', async (req, res) => {
         
         // Update our map with the newly inserted items
         insertItemsRes.rows.forEach(r => itemMap.set(r.name.toLowerCase().trim(), r.id));
+        writeToLogFile('info', `Registered ${insertItemsRes.rows.length} new items from this batch.`);
         
         // Bulk insert history logs for these new items
         if (insertItemsRes.rows.length > 0) {
@@ -727,7 +750,6 @@ app.post('/api/orders', async (req, res) => {
         const itemId = itemMap.get(nameClean);
         
         if (!itemId) {
-          // Skipping orders with empty item names that didn't resolve to any ID
           continue;
         }
         
@@ -759,14 +781,16 @@ app.post('/api/orders', async (req, res) => {
             remarks_timestamp = EXCLUDED.remarks_timestamp
         `;
         await client.query(insertQuery, valueParams);
+        writeToLogFile('info', `Batch insert: successfully saved ${valueParams.length / 8} orders.`);
       }
     }
     
     await client.query('COMMIT');
+    writeToLogFile('info', 'Successfully committed transaction and saved all orders.');
     res.status(201).json({ message: 'Orders saved successfully' });
   } catch (err) {
     if (client) await client.query('ROLLBACK');
-    console.error("Error saving orders:", err);
+    writeToLogFile('error', `Error saving orders: ${err.stack}`);
     res.status(500).json({ error: 'Failed to save orders: ' + err.message });
   } finally {
     if (client) client.release();
@@ -788,6 +812,16 @@ app.delete('/api/orders/:id', async (req, res) => {
 // STATIC FILES & FRONTEND ROUTING
 // ==========================================
 
+app.get('/api/server-logs', (req, res) => {
+  writeToLogFile('info', 'Received request to download server log file');
+  if (fs.existsSync(logFilePath)) {
+    res.setHeader('Content-Type', 'text/plain');
+    res.sendFile(logFilePath);
+  } else {
+    res.status(404).send('Log file not found');
+  }
+});
+
 // Serve static assets from Vite's build folder
 app.use(express.static(path.join(__dirname, 'dist')));
 
@@ -798,5 +832,5 @@ app.get('*', (req, res) => {
 
 // Start Server
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  writeToLogFile('info', `Server is running on port ${PORT}`);
 });

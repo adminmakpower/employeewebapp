@@ -124,6 +124,14 @@
         // Clear logs button
         document.getElementById("clear-logs-btn").addEventListener("click", handleClearLogs);
 
+        // Download server logs button
+        const downloadLogsBtn = document.getElementById("download-server-logs-btn");
+        if (downloadLogsBtn) {
+            downloadLogsBtn.addEventListener("click", () => {
+                window.open("/api/server-logs", "_blank");
+            });
+        }
+
         // Search user binding
         document.getElementById("user-search").addEventListener("input", handleUserSearch);
 

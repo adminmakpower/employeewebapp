@@ -337,7 +337,12 @@
                             <div class="panel-card">
                                 <div class="panel-header">
                                     <h2>System Logs & Audit Trail</h2>
-                                    <button id="clear-logs-btn" class="btn btn-outline btn-sm">Clear Logs</button>
+                                    <div style="display:flex; gap: 8px;">
+                                        <button id="clear-logs-btn" class="btn btn-outline btn-sm">Clear Logs</button>
+                                        <button id="download-server-logs-btn" class="btn btn-primary btn-sm" style="display:inline-flex; align-items:center; gap:6px;">
+                                            <i data-lucide="download" style="width:14px; height:14px;"></i> Download Server Log
+                                        </button>
+                                    </div>
                                 </div>
                                 <div class="panel-body">
                                     <div class="logs-container" id="system-logs-list">
